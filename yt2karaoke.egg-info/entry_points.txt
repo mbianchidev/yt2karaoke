@@ -1,0 +1,2 @@
+[console_scripts]
+yt2karaoke = yt2karaoke.cli:main

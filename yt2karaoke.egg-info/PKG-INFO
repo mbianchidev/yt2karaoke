@@ -1,0 +1,16 @@
+Metadata-Version: 2.1
+Name: yt2karaoke
+Version: 0.1.0
+Summary: Turn any YouTube link into a karaoke experience
+Home-page: https://github.com/mbianchidev/yt2karaoke
+Author: mbianchidev
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Multimedia :: Sound/Audio :: Analysis
+Classifier: Topic :: Multimedia :: Video
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+
+# yt2karaoke
+yt2karaoke turns YouTube links in karaoke experiences
