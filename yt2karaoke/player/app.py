@@ -8,7 +8,9 @@ Provides:
 
 from __future__ import annotations
 
+import atexit
 import os
+import secrets
 from pathlib import Path
 from typing import Optional
 
@@ -52,9 +54,9 @@ def create_app(
         template_folder=str(template_dir),
         static_folder=str(static_dir),
     )
-    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "yt2karaoke-secret")
+    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 
-    socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+    socketio = SocketIO(app, cors_allowed_origins=os.environ.get("CORS_ALLOWED_ORIGINS", ""), async_mode="threading")
 
     # ------------------------------------------------------------------
     # Song queue + background worker
@@ -96,6 +98,7 @@ def create_app(
 
     queue = SongQueue(worker=process_song)
     queue.start_worker()
+    atexit.register(queue.stop_worker)
 
     # ------------------------------------------------------------------
     # Routes
@@ -119,7 +122,7 @@ def create_app(
             abort(400, description="'url' field is required.")
         title = data.get("title", "")
 
-        # Try to prefetch title in the background (non-blocking)
+        # Synchronously fetch title if not provided
         if not title:
             try:
                 info = get_video_info(url)
@@ -141,13 +144,23 @@ def create_app(
 
     @app.route("/api/queue/<song_id>/up", methods=["POST"])
     def move_up(song_id: str):
-        queue.move_up(song_id)
+        song = queue.get_song(song_id)
+        if not song:
+            abort(404, description="Song not found.")
+        moved = queue.move_up(song_id)
+        if not moved:
+            abort(400, description="Song is already at the top of the queue.")
         _emit_queue_update(socketio, queue)
         return jsonify(queue.get_all())
 
     @app.route("/api/queue/<song_id>/down", methods=["POST"])
     def move_down(song_id: str):
-        queue.move_down(song_id)
+        song = queue.get_song(song_id)
+        if not song:
+            abort(404, description="Song not found.")
+        moved = queue.move_down(song_id)
+        if not moved:
+            abort(400, description="Song is already at the bottom of the queue.")
         _emit_queue_update(socketio, queue)
         return jsonify(queue.get_all())
 

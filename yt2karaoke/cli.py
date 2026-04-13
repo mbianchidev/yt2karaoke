@@ -72,6 +72,7 @@ def main() -> None:
 @click.option("--reverb/--no-reverb", default=True, show_default=True, help="Apply reverb to vocals.")
 @click.option("--delay/--no-delay", default=True, show_default=True, help="Apply delay/echo to vocals.")
 @click.option("--distortion/--no-distortion", default=False, show_default=True, help="Apply distortion to vocals.")
+@click.option("--chorus/--no-chorus", default=False, show_default=True, help="Apply chorus to vocals.")
 def convert(
     url: str,
     output_dir: str,
@@ -89,6 +90,7 @@ def convert(
     reverb: bool,
     delay: bool,
     distortion: bool,
+    chorus: bool,
 ) -> None:
     """Convert a YouTube URL to a karaoke video.
 
@@ -118,6 +120,7 @@ def convert(
         apply_reverb=reverb,
         apply_delay=delay,
         apply_distortion=distortion,
+        apply_chorus=chorus,
     )
 
     click.echo(f"🎤 yt2karaoke v{__version__}")

@@ -9,14 +9,13 @@ Combines:
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
-from .transcriber import LyricLine, LyricWord
-from .visuals import generate_frames, render_lyric_frame
+from .transcriber import LyricLine
+from .visuals import render_lyric_frame
 
 
 class VideoError(Exception):
@@ -63,9 +62,7 @@ def build_video(
             VideoClip,
             AudioFileClip,
             CompositeAudioClip,
-            concatenate_audioclips,
         )
-        from moviepy.audio.AudioClip import AudioArrayClip
     except ImportError as exc:
         raise VideoError(
             "moviepy is not installed.  Run: pip install moviepy"
@@ -77,6 +74,7 @@ def build_video(
 
     # Determine video duration from the instrumental audio
     instrumental_clip = AudioFileClip(str(instrumental_path))
+    vocals_clip = None
     duration = instrumental_clip.duration
 
     # Build frame generator state
@@ -101,8 +99,8 @@ def build_video(
         try:
             vocals_clip = AudioFileClip(str(vocals_path)).volumex(vocals_volume)
             audio_tracks.append(vocals_clip)
-        except Exception:
-            pass  # If vocals fail to load, just use instrumental
+        except Exception as exc:
+            raise VideoError(f"Failed to load vocals audio: {exc}") from exc
 
     if len(audio_tracks) > 1:
         audio = CompositeAudioClip(audio_tracks)
@@ -126,6 +124,8 @@ def build_video(
         raise VideoError(f"Failed to write video: {exc}") from exc
     finally:
         instrumental_clip.close()
+        if vocals_clip is not None:
+            vocals_clip.close()
         video_clip.close()
 
     return output_path

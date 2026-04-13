@@ -8,9 +8,8 @@ processing to a running track2stem service when available.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
-import tempfile
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -82,7 +81,7 @@ def _run_demucs(
 ) -> None:
     """Invoke the ``demucs`` CLI to separate *audio_path*."""
     cmd = [
-        "python3",
+        sys.executable,
         "-m",
         "demucs",
         "--two-stems=vocals",

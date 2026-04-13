@@ -69,7 +69,6 @@ class SongQueue:
         self._worker = worker
         self._worker_thread: Optional[threading.Thread] = None
         self._running = False
-        self._current_index: int = -1
 
     # ------------------------------------------------------------------
     # Queue operations
@@ -114,7 +113,7 @@ class SongQueue:
         """Move a queued song one position toward the front of the queue."""
         with self._lock:
             for i, song in enumerate(self._songs):
-                if song.song_id == song_id and i > 0:
+                if song.song_id == song_id and song.status == SongStatus.QUEUED and i > 0:
                     self._songs[i], self._songs[i - 1] = (
                         self._songs[i - 1],
                         self._songs[i],
@@ -126,7 +125,7 @@ class SongQueue:
         """Move a queued song one position toward the back of the queue."""
         with self._lock:
             for i, song in enumerate(self._songs):
-                if song.song_id == song_id and i < len(self._songs) - 1:
+                if song.song_id == song_id and song.status == SongStatus.QUEUED and i < len(self._songs) - 1:
                     self._songs[i], self._songs[i + 1] = (
                         self._songs[i + 1],
                         self._songs[i],
@@ -195,11 +194,14 @@ class SongQueue:
                 song = self.next_pending()
                 if song is None:
                     break
-                song.status = SongStatus.PROCESSING
+                with self._lock:
+                    song.status = SongStatus.PROCESSING
                 try:
                     self._worker(song)
-                    if song.status == SongStatus.PROCESSING:
-                        song.status = SongStatus.READY
+                    with self._lock:
+                        if song.status == SongStatus.PROCESSING:
+                            song.status = SongStatus.READY
                 except Exception as exc:
-                    song.status = SongStatus.ERROR
-                    song.error = str(exc)
+                    with self._lock:
+                        song.status = SongStatus.ERROR
+                        song.error = str(exc)

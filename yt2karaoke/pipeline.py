@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -198,7 +198,7 @@ def run(config: KaraokeConfig) -> KaraokeResult:
             visual_speed=config.visual_speed,
             font_size=config.font_size,
             vocals_path=processed_vocals,
-            vocals_volume=config.vocals_volume,
+            vocals_volume=1.0,
         )
         bar.update()
 

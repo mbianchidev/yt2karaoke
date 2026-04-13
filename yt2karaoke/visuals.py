@@ -12,35 +12,9 @@ import math
 from typing import Generator
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 
 
-# ---------------------------------------------------------------------------
-# Color palette helpers
-# ---------------------------------------------------------------------------
-
-def _hsv_to_rgb(h: float, s: float, v: float) -> tuple[int, int, int]:
-    """Convert HSV (all 0–1) to RGB (0–255)."""
-    import colorsys
-    r, g, b = colorsys.hsv_to_rgb(h, s, v)
-    return int(r * 255), int(g * 255), int(b * 255)
-
-
-def _plasma_color(x: float, y: float, t: float) -> tuple[int, int, int]:
-    """Return a plasma color for position (x, y) at time t."""
-    v = (
-        math.sin(x * 3.0 + t)
-        + math.sin(y * 3.0 + t * 0.7)
-        + math.sin((x + y) * 2.0 + t * 0.5)
-        + math.sin(math.sqrt(x * x + y * y + 1.0) * 2.5 - t)
-    )
-    v = (v + 4.0) / 8.0  # normalize 0..1
-    hue = (v + t * 0.05) % 1.0
-    return _hsv_to_rgb(hue, 0.85, 0.85)
-
-
-# ---------------------------------------------------------------------------
-# Frame generator
 # ---------------------------------------------------------------------------
 
 def generate_frames(
@@ -158,13 +132,16 @@ def render_lyric_frame(
         current_line: Currently active lyric line.
         next_line: Next lyric line (shown dimmed below).
         highlight_word: Word within *current_line* currently being sung.
-        width: Frame width in pixels.
-        height: Frame height in pixels.
+        width: Ignored — dimensions are derived from *background* shape.
+        height: Ignored — dimensions are derived from *background* shape.
         font_size: Font size for the main lyrics.
 
     Returns:
         Composited frame as NumPy array (H x W x 3, uint8).
     """
+    # Always derive dimensions from the actual background to ensure correct placement
+    height, width = background.shape[:2]
+
     bg = Image.fromarray(background, mode="RGB")
     # Darken the background slightly so text is readable
     overlay = Image.new("RGBA", bg.size, (0, 0, 0, 100))
@@ -175,8 +152,36 @@ def render_lyric_frame(
 
     try:
         from PIL import ImageFont
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
-        small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", int(font_size * 0.7))
+        _FONT_CANDIDATES_BOLD = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "C:/Windows/Fonts/arialbd.ttf",
+        ]
+        _FONT_CANDIDATES = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "C:/Windows/Fonts/arial.ttf",
+        ]
+        font = None
+        for candidate in _FONT_CANDIDATES_BOLD:
+            try:
+                font = ImageFont.truetype(candidate, font_size)
+                break
+            except (IOError, OSError):
+                continue
+        if font is None:
+            font = ImageFont.load_default()
+        small_font = None
+        for candidate in _FONT_CANDIDATES:
+            try:
+                small_font = ImageFont.truetype(candidate, int(font_size * 0.7))
+                break
+            except (IOError, OSError):
+                continue
+        if small_font is None:
+            small_font = font
     except (IOError, OSError):
         from PIL import ImageFont
         font = ImageFont.load_default()
