@@ -218,20 +218,21 @@ Real-time queue updates are delivered via **WebSocket** (Socket.IO event `queue_
 ## Architecture
 
 ```
-yt2karaoke/
-├── cli.py              CLI entry point (click)
-├── pipeline.py         Orchestrates the full processing pipeline
-├── downloader.py       YouTube audio download (yt-dlp)
-├── separator.py        Vocal/instrumental separation (Demucs + track2stem client)
-├── transcriber.py      Lyrics extraction + timestamp sync (Whisper)
-├── effects.py          Voice effects: reverb, delay, distortion (pedalboard / NumPy)
-├── visuals.py          Animated background frame generator (NumPy + Pillow)
-├── video.py            Karaoke video assembler (MoviePy)
-└── player/
-    ├── app.py          Flask web player + SocketIO
-    ├── queue.py        Thread-safe song queue with background worker
-    └── templates/
-        └── index.html  Browser player UI
+src/
+└── yt2karaoke/
+    ├── cli.py              CLI entry point (click)
+    ├── pipeline.py         Orchestrates the full processing pipeline
+    ├── downloader.py       YouTube audio download (yt-dlp)
+    ├── separator.py        Vocal/instrumental separation (Demucs + track2stem client)
+    ├── transcriber.py      Lyrics extraction + timestamp sync (Whisper)
+    ├── effects.py          Voice effects: reverb, delay, distortion (pedalboard / NumPy)
+    ├── visuals.py          Animated background frame generator (NumPy + Pillow)
+    ├── video.py            Karaoke video assembler (MoviePy)
+    └── player/
+        ├── app.py          Flask web player + SocketIO
+        ├── queue.py        Thread-safe song queue with background worker
+        └── templates/
+            └── index.html  Browser player UI
 ```
 
 ---
@@ -239,9 +240,8 @@ yt2karaoke/
 ## Development
 
 ```bash
-# Install dev dependencies
-pip install -r requirements.txt
-pip install -e .
+# Install the project and test dependencies
+pip install -e ".[dev]"
 
 # Run tests
 pytest
