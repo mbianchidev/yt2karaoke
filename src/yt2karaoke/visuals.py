@@ -142,7 +142,7 @@ def render_lyric_frame(
     # Always derive dimensions from the actual background to ensure correct placement
     height, width = background.shape[:2]
 
-    bg = Image.fromarray(background, mode="RGB")
+    bg = Image.fromarray(background)
     # Darken the background slightly so text is readable
     overlay = Image.new("RGBA", bg.size, (0, 0, 0, 100))
     bg = bg.convert("RGBA")
