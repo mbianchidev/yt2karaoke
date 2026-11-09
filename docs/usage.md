@@ -17,6 +17,12 @@ Open [localhost:5000](http://localhost:5000). Models download on first use, so t
 
 The player is a local development server. Keep the default loopback host; do not expose it publicly. The queue is held in memory for the running session. Exported videos, stems and lyrics remain in the output directory after shutdown.
 
+## Studio appearance
+
+Use **Theme** in the header to choose **System**, **Light**, or **Dark**. System is the default and follows your operating system's appearance, including changes while the studio is open. An explicit Light or Dark choice overrides the system setting.
+
+Your preference is saved locally in the browser, survives reloads, and stays in sync across studio tabs on the same origin. If browser storage is blocked, theme changes still work for the current page and a save failure is shown. The studio theme does not change video backgrounds or exported media.
+
 ## Add and play a song
 
 Choose **YouTube link** or **Local file**, then **Add to queue**. Local inputs can be WAV, MP3, FLAC, M4A, OGG, AAC, MP4, WebM or AIFF; the request limit is 250 MB.

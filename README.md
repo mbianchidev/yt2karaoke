@@ -2,7 +2,7 @@
 
 Your local karaoke studio. Turn a YouTube link or local audio file into an **instrumental MP4 with word-synchronized lyrics**, then optionally export a separate mix with **0 to 100% of the original vocals**.
 
-Demucs separates the track, Whisper finds the words, and animated visuals put the lyrics on screen. The browser studio includes a song queue, processing updates, playback controls, downloads, and a per-song vocal guide.
+Demucs separates the track, Whisper finds the words, and animated visuals put the lyrics on screen. The browser studio includes a song queue, processing updates, playback controls, downloads, a per-song vocal guide, and light/dark themes.
 
 ## Quick start
 

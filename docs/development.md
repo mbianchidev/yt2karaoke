@@ -31,13 +31,14 @@ pytest tests/e2e
 pytest tests/live -m live_youtube
 
 # JavaScript syntax
+node --check src/yt2karaoke/player/static/theme.js
 node --check src/yt2karaoke/player/static/studio.js
 
 # Wheel and source distribution using uv's isolated build backend
 uv build
 ```
 
-The browser tests use generated sine-wave media and original test lyrics. Download, separation and transcription services are mocked in these deterministic tests; the pipeline, video encoder, remix, HTTP server, queue, browser controls and file downloads are real.
+The browser tests run with both light and dark system preferences and use generated sine-wave media and original test lyrics. Download, separation and transcription services are mocked in these deterministic tests; the pipeline, video encoder, remix, HTTP server, queue, browser controls and file downloads are real. Theme checks cover keyboard selection, persistence, system changes, cross-tab synchronization, blocked storage, contrast and narrow layouts.
 
 The encoded-media tests verify H.264/AAC, 16:9 output, `yuv420p`, fast-start metadata, the absence of the test vocal frequency in the instrumental, the requested 25% gain, unchanged instrumental gain, unchanged video frames after remix, and individual highlighting of repeated words. These tests skip if ffmpeg is unavailable.
 
@@ -84,7 +85,8 @@ This is a live external-service test: network errors, unavailable media, YouTube
 | `player/queue.py` | Thread-safe song queue and serialized jobs |
 | `player/app.py` | Flask/Socket.IO routes, upload cleanup and media serving |
 | `player/templates/index.html` | Accessible studio structure |
-| `player/static/studio.css` | Responsive studio and reduced-motion styles |
+| `player/static/studio.css` | Light/dark palettes, responsive studio and reduced-motion styles |
+| `player/static/theme.js` | Pre-render theme selection, browser persistence and system changes |
 | `player/static/studio.js` | Queue, player, per-song mix controls and errors |
 
 ## Self-hosted assets

@@ -230,5 +230,5 @@ def test_ready_song_can_be_removed(app_client):
 
 
 def test_studio_assets_are_served(app_client):
-    for path in ("/static/studio.css", "/static/studio.js", "/static/vendor/socket.io.min.js"):
+    for path in ("/static/studio.css", "/static/studio.js", "/static/theme.js", "/static/vendor/socket.io.min.js"):
         assert app_client.get(path).status_code == 200

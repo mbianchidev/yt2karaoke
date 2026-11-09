@@ -88,6 +88,7 @@ jobs:
 
       - name: Run deterministic tests and JavaScript checks
         run: |
+          node --check src/yt2karaoke/player/static/theme.js
           node --check src/yt2karaoke/player/static/studio.js
           python -m pytest tests -m "not live_youtube" \
             --junitxml="$YT2KARAOKE_ARTIFACT_DIR/unit.xml"
