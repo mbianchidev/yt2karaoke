@@ -202,8 +202,8 @@
     byId("processing-progress").value = song?.progress || 0;
     byId("processing-progress").hidden = Boolean(failed);
     byId("processing-overlay").querySelector(".processing-spinner").hidden = Boolean(failed);
-    byId("now-playing-title").textContent = song?.title || (song ? "YouTube track" : "No song selected");
-    byId("now-playing-title").title = song?.title || "";
+    byId("now-playing-title").textContent = song?.title || song?.url || "No song selected";
+    byId("now-playing-title").title = song?.title || song?.url || "";
     const percent = Math.round((song?.rendered_vocals_volume || 0) * 100);
     byId("now-playing-meta").textContent = playable
       ? `${timeLabel(song.duration)} / ${percent === 0 ? "Instrumental only" : `${percent}% original vocals`} / MP4`
@@ -323,7 +323,7 @@
       if (!row) { row = createRow(song.id); rows.set(song.id, row); }
       row.dataset.status = song.status;
       row.dataset.selected = String(song.id === state.currentId);
-      const title = song.title || "YouTube track";
+      const title = song.title || song.url || "Local track";
       const busy = ["DOWNLOADING", "PROCESSING"].includes(song.status);
       row.querySelector(".queue-number").textContent = String(index + 1).padStart(2, "0");
       row.querySelector(".queue-title").textContent = title;
@@ -346,8 +346,10 @@
         button.title = `${label} ${title}`;
         button.hidden = action === "play" ? !song.video_url
           : action === "retry" ? song.status !== "ERROR"
-          : ["up", "down"].includes(action) ? song.status !== "QUEUED" : busy;
-        button.disabled = (action === "up" && index === 0) || (action === "down" && index === state.songs.length - 1);
+          : ["up", "down"].includes(action) ? song.status !== "QUEUED" || Boolean(song.video_url) : busy;
+        const neighbor = state.songs[index + (action === "up" ? -1 : 1)];
+        button.disabled = ["up", "down"].includes(action)
+          && (!neighbor || neighbor.status !== "QUEUED" || Boolean(neighbor.video_url));
       }
       if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
     });
@@ -359,10 +361,13 @@
 
   function updateQueue(songs) {
     if (!Array.isArray(songs)) throw new Error("The studio returned an invalid song queue.");
+    const previousSongs = state.songs;
     state.songs = songs;
     if (state.currentId && !currentSong()) resetSelection();
     const selected = currentSong();
-    if (!selected && songs.length) {
+    if (selected?.status === "ERROR" && songs.some((song) => song.video_url)) {
+      selectSong(songs.find((song) => song.video_url));
+    } else if (!selected && songs.length) {
       selectSong(songs.find((song) => song.video_url) || songs[0]);
     } else if (selected?.video_url !== state.videoUrl && selected?.video_url) {
       selectSong(selected, { preservePlayback: true, syncMix: false });
@@ -370,6 +375,11 @@
       updatePreview(selected);
       renderRows();
     }
+    if (songs.some((song) => {
+      const previous = previousSongs.find((entry) => entry.id === song.id);
+      return song.status === "READY" && !song.error && song.rendered_vocals_volume > 0
+        && previous?.video_url && previous.status !== "READY";
+    })) showNotice("Vocal mix ready to download.");
   }
 
   form.addEventListener("submit", async (event) => {
@@ -398,6 +408,7 @@
       byId("title-input").value = "";
       byId("audio-input").value = "";
       byId("lyrics-input").value = "";
+      byId("optional-settings").open = false;
       showNotice("Song added to queue. We'll get the stage ready.");
       await refreshQueue();
     } catch (error) {
@@ -431,14 +442,18 @@
   byId("apply-mix").addEventListener("click", async () => {
     const song = currentSong();
     if (!song) { showError(new Error("Select a ready song to create a vocal mix.")); return; }
+    const volume = desiredVolume();
     byId("apply-mix").disabled = true;
     try {
-      await api(`/api/queue/${song.id}/mix`, {
+      const result = await api(`/api/queue/${song.id}/mix`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vocals_volume: desiredVolume() }),
+        body: JSON.stringify({ vocals_volume: volume }),
       });
-      showNotice(desiredVolume() === 0 ? "Instrumental selected." : "Creating your separate vocal mix.");
       await refreshQueue();
+      const updated = state.songs.find((entry) => entry.id === song.id) || result;
+      showNotice(volume === 0 ? "Instrumental selected."
+        : updated.status === "READY" && updated.rendered_vocals_volume === volume
+          ? "Vocal mix ready to download." : "Creating your separate vocal mix.");
     } catch (error) {
       showError(error);
     } finally {

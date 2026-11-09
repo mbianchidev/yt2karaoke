@@ -213,7 +213,12 @@ class SongQueue:
         """Move a queued song one position toward the front of the queue."""
         with self._lock:
             for i, song in enumerate(self._songs):
-                if song.song_id == song_id and song.status == SongStatus.QUEUED and i > 0:
+                if (
+                    song.song_id == song_id and song.status == SongStatus.QUEUED
+                    and song.video_path is None and i > 0
+                    and self._songs[i - 1].status == SongStatus.QUEUED
+                    and self._songs[i - 1].video_path is None
+                ):
                     self._songs[i], self._songs[i - 1] = (
                         self._songs[i - 1],
                         self._songs[i],
@@ -225,7 +230,12 @@ class SongQueue:
         """Move a queued song one position toward the back of the queue."""
         with self._lock:
             for i, song in enumerate(self._songs):
-                if song.song_id == song_id and song.status == SongStatus.QUEUED and i < len(self._songs) - 1:
+                if (
+                    song.song_id == song_id and song.status == SongStatus.QUEUED
+                    and song.video_path is None and i < len(self._songs) - 1
+                    and self._songs[i + 1].status == SongStatus.QUEUED
+                    and self._songs[i + 1].video_path is None
+                ):
                     self._songs[i], self._songs[i + 1] = (
                         self._songs[i + 1],
                         self._songs[i],

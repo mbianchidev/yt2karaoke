@@ -86,10 +86,11 @@
             <summary>Optional settings</summary>
             <div class="optional-fields">
               <label for="title-input">Song title<input id="title-input" type="text" maxlength="200" placeholder="Leave blank to detect the title"></label>
-              <label id="lyrics-upload-label" for="lyrics-input" hidden>Timed lyrics JSON
+              <div id="lyrics-upload-label" class="lyrics-upload-field" hidden>
+                <label for="lyrics-input">Timed lyrics JSON</label>
                 <input id="lyrics-input" type="file" accept=".json" disabled aria-describedby="lyrics-help">
-                <span id="lyrics-help">Optional. Use your own word timestamps instead of automatic transcription.</span>
-              </label>
+                <p id="lyrics-help">Optional. Use your own word timestamps instead of automatic transcription.</p>
+              </div>
             </div>
           </details>
         </div>

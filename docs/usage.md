@@ -31,6 +31,8 @@ Automatic transcription is not a guarantee of perfect lyrics, especially with sc
 
 At **0%**, the output contains only the separated instrumental. Transcription always uses the full-strength isolated vocals, even when the output is instrumental-only.
 
+AI separation can leave some vocal bleed. Review the instrumental with headphones before using it for a performance.
+
 Turn on **Add original vocals**, use a preset or choose a percentage, and select **Create vocal mix** for the selected ready song. **Download instrumental MP4** remains available independently of **Download 25% vocal mix** (or your chosen percentage).
 
 A vocal mix reuses the saved full-strength stems and copies the existing H.264 video stream. It does not repeat separation, transcription or video rendering, so the baked-in lyric timing is unchanged. The percentage is a linear gain on the original isolated vocals; the instrumental level is retained and a peak limiter prevents clipping.
