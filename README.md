@@ -10,6 +10,8 @@ Requires **Python 3.11-3.14** (3.14 recommended) and **ffmpeg/ffprobe** in `PATH
 
 YouTube inputs also need **Node.js 22+** or **Deno 2.3+** in `PATH`. The Python install includes yt-dlp's JavaScript challenge solver.
 
+For published wheels, follow the [macOS release setup](docs/usage.md#from-github-releases-macos). From a source checkout:
+
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate
@@ -31,6 +33,7 @@ Only process media and lyrics you own or are otherwise authorized to use. The so
 
 - [Usage, vocal mixes, timed lyrics, CLI and REST API](docs/usage.md)
 - [Development, browser tests, media checks and packaging](docs/development.md)
+- [Publishing versioned GitHub Releases](docs/development.md#publishing-releases)
 
 Full-song CI exercises the real YouTube pipeline and a 10% vocal guide when a draft is marked ready, on `main` pushes, or manually. Reports and a bounded preview expire after 3 days; full-song media and lyrics are not uploaded.
 

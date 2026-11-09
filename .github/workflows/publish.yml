@@ -1,0 +1,195 @@
+name: Publish Python packages
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and verify packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      wheel: ${{ steps.package.outputs.wheel }}
+      prerelease: ${{ steps.package.outputs.prerelease }}
+    steps:
+      - name: Check out the release revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python and uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.14"
+          activate-environment: true
+          enable-cache: true
+          cache-dependency-glob: |
+            setup.py
+            pyproject.toml
+
+      - name: Build wheel and source archive
+        run: uv build
+
+      - name: Install the wheel with CPU-only dependencies
+        run: |
+          uv pip install --torch-backend=cpu dist/*.whl "packaging>=26.0"
+          uv pip check
+
+      - name: Verify package version and installed studio
+        id: package
+        run: |
+          yt2karaoke --version
+          yt2karaoke player --help
+          python - <<'PY'
+          import os
+          import sys
+          import tempfile
+          from importlib.metadata import version
+          from pathlib import Path
+
+          from packaging.version import Version
+
+          import yt2karaoke
+          from yt2karaoke.player.app import create_app
+
+          package_version = Version(version("yt2karaoke"))
+          if yt2karaoke.__version__ != str(package_version):
+              raise SystemExit("setup.py and yt2karaoke.__version__ must match.")
+          if os.environ["GITHUB_REF_TYPE"] == "tag":
+              expected_tag = f"v{package_version}"
+              if os.environ["GITHUB_REF_NAME"] != expected_tag:
+                  raise SystemExit(f"The package version requires tag {expected_tag}.")
+          if not Path(yt2karaoke.__file__).is_relative_to(sys.prefix):
+              raise SystemExit("The smoke check must import the installed wheel.")
+
+          wheel, = Path("dist").glob("*.whl")
+          source, = Path("dist").glob("*.tar.gz")
+          if not wheel.stat().st_size or not source.stat().st_size:
+              raise SystemExit("Both distribution archives must be nonempty.")
+          with tempfile.TemporaryDirectory() as output_dir:
+              app, _ = create_app(output_dir=output_dir)
+              try:
+                  with app.test_client() as client:
+                      for route in ("/", "/stage", "/api/health", "/static/studio.js",
+                                    "/static/studio.css", "/static/vendor/socket.io.min.js"):
+                          response = client.get(route)
+                          if response.status_code != 200 or not response.data:
+                              raise SystemExit(f"Installed studio failed to serve {route}.")
+              finally:
+                  app.extensions["song_queue"].stop_worker()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"wheel={wheel.name}", file=output)
+              print(f"prerelease={str(package_version.is_prerelease).lower()}", file=output)
+          PY
+
+      - name: Audit installed dependencies
+        run: |
+          python scripts/ci_audit_requirements.py "$RUNNER_TEMP/audit-requirements.txt"
+          uvx pip-audit --strict --disable-pip --no-deps \
+            --requirement "$RUNNER_TEMP/audit-requirements.txt"
+
+      - name: Create checksums
+        working-directory: dist
+        run: sha256sum -- *.whl *.tar.gz > SHA256SUMS
+
+      - name: Pass verified packages to publishing
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-packages
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+  publish:
+    name: Publish GitHub Release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      WHEEL: ${{ needs.build.outputs.wheel }}
+      PRERELEASE: ${{ needs.build.outputs.prerelease }}
+    steps:
+      - name: Download verified packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-packages
+          path: dist
+
+      - name: Verify package transfer
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS
+
+      - name: Write installation notes
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from textwrap import dedent
+
+          notes = dedent(f"""\
+          ## Run on macOS
+
+          Download `{os.environ["WHEEL"]}` from this release, then run these commands
+          in the download directory:
+
+          ```bash
+          brew install uv ffmpeg node
+          uvx --python 3.14 --from ./{os.environ["WHEEL"]} yt2karaoke player --port 5000
+          ```
+
+          Open http://localhost:5000. uvx manages Python and Python dependencies.
+          The first conversion downloads the AI models and needs internet access.
+          Press Ctrl+C in the terminal to stop the server. Keep its default loopback host.
+
+          To upgrade, stop the running server, download the new wheel, and rerun
+          the command with its filename. Existing output files are retained.
+
+          This is a terminal-launched local web app, not a standalone desktop installer.
+          Packages are not published to PyPI. The source archive is also attached;
+          SHA256SUMS contains the SHA-256 hashes of both packages.
+
+          Built from commit `{os.environ["GITHUB_SHA"]}`.
+
+          """)
+          (Path(os.environ["RUNNER_TEMP"]) / "release-notes.md").write_text(
+              notes, encoding="utf-8",
+          )
+          PY
+
+      - name: Publish packages and release notes
+        run: |
+          flags=()
+          if [[ "$PRERELEASE" == "true" ]]; then
+            flags+=(--prerelease --latest=false)
+          fi
+          gh release create "$RELEASE_TAG" dist/*.whl dist/*.tar.gz dist/SHA256SUMS \
+            --verify-tag --title "$RELEASE_TAG" --generate-notes \
+            --notes-file "$RUNNER_TEMP/release-notes.md" "${flags[@]}"
+
+      - name: Verify published downloads
+        run: |
+          gh release download "$RELEASE_TAG" --dir "$RUNNER_TEMP/published" \
+            --pattern '*.whl' --pattern '*.tar.gz' --pattern SHA256SUMS
+          cd "$RUNNER_TEMP/published"
+          sha256sum --check SHA256SUMS

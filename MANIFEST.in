@@ -1,4 +1,4 @@
 recursive-include tests *.py *.cjs
 recursive-include scripts *.py
 recursive-include docs *.md
-include .github/workflows/youtube-full-song.yml
+include .github/workflows/*.yml
