@@ -31,7 +31,7 @@ setup(
         "requests>=2.31.0",
     ],
     extras_require={
-        "dev": ["pytest>=9.0.3", "playwright>=1.56,<2"],
+        "dev": ["pytest>=9.0.3", "playwright>=1.56,<2", "packaging>=26.0"],
     },
     entry_points={
         "console_scripts": [

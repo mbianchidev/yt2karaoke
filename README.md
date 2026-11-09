@@ -32,6 +32,8 @@ Only process media and lyrics you own or are otherwise authorized to use. The so
 - [Usage, vocal mixes, timed lyrics, CLI and REST API](docs/usage.md)
 - [Development, browser tests, media checks and packaging](docs/development.md)
 
+Full-song CI exercises the real YouTube pipeline and a 10% vocal guide when a draft is marked ready, on `main` pushes, or manually. Reports and a bounded preview expire after 3 days; full-song media and lyrics are not uploaded.
+
 ## Stack
 
 Python, Flask + Socket.IO, Demucs or [track2stem](https://github.com/mbianchidev/track2stem), OpenAI Whisper, FFmpeg, NumPy and Pillow. The frontend is plain HTML, CSS and JavaScript with self-hosted fonts and Socket.IO. No frontend build step or CDN access is required.

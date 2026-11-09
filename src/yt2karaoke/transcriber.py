@@ -158,10 +158,13 @@ def _parse_whisper_result(result: dict) -> list[LyricLine]:
                     end=float(w.get("end", 0.0)),
                 )
             )
+        # Whisper's segment window can exclude its final word timestamp.
+        start = min(word.start for word in words) if words else float(segment.get("start", 0.0))
+        end = max(word.end for word in words) if words else float(segment.get("end", 0.0))
         line = LyricLine(
             text=segment.get("text", "").strip(),
-            start=float(segment.get("start", 0.0)),
-            end=float(segment.get("end", 0.0)),
+            start=start,
+            end=end,
             words=words,
         )
         lines.append(line)

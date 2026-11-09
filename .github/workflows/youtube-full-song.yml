@@ -1,0 +1,123 @@
+name: Full-song karaoke CI
+
+on:
+  pull_request:
+    types: [ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-song-karaoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-song:
+    name: Tests and full-song YouTube E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
+      PYTHONUNBUFFERED: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+    steps:
+      - name: Prepare safe reports
+        run: |
+          artifact_dir="$RUNNER_TEMP/youtube-e2e-artifacts"
+          mkdir -p "$artifact_dir"
+          echo "YT2KARAOKE_ARTIFACT_DIR=$artifact_dir" >> "$GITHUB_ENV"
+          printf '{"result":"not_started","revision":"%s","stage":"Installing dependencies"}\n' \
+            "$GITHUB_SHA" > "$artifact_dir/report.json"
+
+      - name: Check out the tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node for YouTube extraction
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+
+      - name: Set up Python and cached dependencies
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.14"
+          activate-environment: true
+          enable-cache: true
+          cache-dependency-glob: |
+            requirements.txt
+            setup.py
+            pyproject.toml
+
+      - name: Install system media tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Install CPU-only project and browser dependencies
+        run: |
+          uv pip install --torch-backend=cpu -e ".[dev]"
+          uv pip check
+          python -m playwright install --with-deps chromium
+
+      - name: Restore public model weights
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/torch/hub/checkpoints
+            ~/.cache/whisper
+            ~/.cache/huggingface/hub
+          key: youtube-models-${{ runner.os }}-${{ runner.arch }}-htdemucs-small-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            youtube-models-${{ runner.os }}-${{ runner.arch }}-htdemucs-small-
+
+      - name: Audit installed dependencies
+        run: |
+          python scripts/ci_audit_requirements.py "$RUNNER_TEMP/audit-requirements.txt"
+          uvx pip-audit --strict --disable-pip --no-deps \
+            --requirement "$RUNNER_TEMP/audit-requirements.txt" \
+            --format=json --output "$YT2KARAOKE_ARTIFACT_DIR/dependency-audit.json"
+
+      - name: Run deterministic tests and JavaScript checks
+        run: |
+          node --check src/yt2karaoke/player/static/studio.js
+          python -m pytest tests -m "not live_youtube" \
+            --junitxml="$YT2KARAOKE_ARTIFACT_DIR/unit.xml"
+
+      - name: Build and verify the installed wheel
+        run: |
+          uv build
+          uv venv --python 3.14 "$RUNNER_TEMP/wheel-smoke"
+          uv pip install --python "$RUNNER_TEMP/wheel-smoke/bin/python" \
+            --torch-backend=cpu dist/*.whl
+          env -u PYTHONPATH "$RUNNER_TEMP/wheel-smoke/bin/python" \
+            -c "import yt2karaoke; from yt2karaoke.player.app import create_app; assert 'site-packages' in yt2karaoke.__file__"
+
+      - name: Test the complete YouTube song and 10% vocal guide
+        run: |
+          python -m pytest tests/live -m live_youtube \
+            --basetemp="$RUNNER_TEMP/youtube-e2e-work" \
+            --junitxml="$YT2KARAOKE_ARTIFACT_DIR/live.xml"
+
+      - name: Upload reports and bounded preview
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: youtube-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/youtube-e2e-artifacts/report.json
+            ${{ runner.temp }}/youtube-e2e-artifacts/preview.mp4
+            ${{ runner.temp }}/youtube-e2e-artifacts/live.xml
+            ${{ runner.temp }}/youtube-e2e-artifacts/unit.xml
+            ${{ runner.temp }}/youtube-e2e-artifacts/dependency-audit.json
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error

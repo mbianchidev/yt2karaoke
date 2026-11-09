@@ -27,6 +27,9 @@ pytest tests --ignore=tests/e2e
 # Browser journeys, including actual MP4 downloads
 pytest tests/e2e
 
+# Opt-in full-song YouTube regression with real models and encoding
+pytest tests/live -m live_youtube
+
 # JavaScript syntax
 node --check src/yt2karaoke/player/static/studio.js
 
@@ -34,9 +37,38 @@ node --check src/yt2karaoke/player/static/studio.js
 uv build
 ```
 
-The browser tests use generated sine-wave media and original test lyrics. Download, separation and transcription services are mocked in these deterministic tests; the pipeline, video encoder, remix, HTTP server, queue, browser controls and file downloads are real. Run a local-media conversion separately to exercise downloaded Demucs and Whisper models.
+The browser tests use generated sine-wave media and original test lyrics. Download, separation and transcription services are mocked in these deterministic tests; the pipeline, video encoder, remix, HTTP server, queue, browser controls and file downloads are real.
 
 The encoded-media tests verify H.264/AAC, 16:9 output, `yuv420p`, fast-start metadata, the absence of the test vocal frequency in the instrumental, the requested 25% gain, unchanged instrumental gain, unchanged video frames after remix, and individual highlighting of repeated words. These tests skip if ffmpeg is unavailable.
+
+## Full-song CI
+
+`.github/workflows/youtube-full-song.yml` runs the deterministic suite, builds and checks the installed wheel, audits dependencies, and processes the complete user-selected YouTube source with real yt-dlp, Demucs, Whisper-small and FFmpeg.
+
+The live test uses the full approximately 218-second recording, not a cropped or mocked substitute. It checks automatic word timestamps, subtitle exports, full-duration 720p H.264/AAC encoding, fast-start metadata, and a separate 10% original-vocal mix. The mixed export must preserve the video stream and timing; decoded audio must measure within 0.015 of the requested linear vocal gain. It does not claim word-for-word transcription accuracy against a reference lyric sheet.
+
+Displayed lyric lines use their first and last word timestamps rather than Whisper's segment windows, which can otherwise hide words that extend beyond a segment boundary.
+
+The `live_youtube` marker is excluded from normal pytest runs. Run it explicitly with `pytest tests/live -m live_youtube`. To choose where local reports and the bounded preview are saved:
+
+```bash
+YT2KARAOKE_ARTIFACT_DIR=/absolute/path/to/reports \
+  pytest tests/live -m live_youtube --junitxml=/absolute/path/to/reports/live.xml
+```
+
+The private-repository trigger policy is deliberately strict:
+
+- Marking a draft PR **ready for review** runs CI on that event's revision.
+- Draft creation, draft pushes, opening an already-ready PR, and later commits on a ready PR do not trigger it. After each new head, return the PR to draft and mark it ready again.
+- Pushes to `main` and manual dispatch are supported. Manual dispatch tests the selected ref and does not replace PR readiness validation; a newly added workflow may not be dispatchable until it exists on the default branch.
+
+The workflow uses one CPU-only Linux job, two model/encoder threads, dependency caching and public model-weight caching. It cancels obsolete runs for the same PR/ref. Source recordings, separated song stems, full lyrics and full-song renders stay in a private temporary directory and are removed after the test. They are never cached or uploaded.
+
+The audit exports the actual installed versions and maps only official `torch+cpu` wheels to their upstream Torch release before strict advisory lookup. This avoids silently skipping CPU wheels that are absent from PyPI. The unpublished local project is excluded; unknown third-party distributions or unsupported local version suffixes fail the audit. The pinned list is for advisory lookup only, with dependency installation and resolution disabled.
+
+Uploaded artifacts expire after **3 days**. An explicit file allowlist contains only the technical JSON report, JUnit reports, dependency audit, and a bounded preview of at most five seconds with at most 40 lyric characters and a 10% vocal guide. Failure reports contain counts and stage/error information, not transcript text. Cancellation does not keep an obsolete run alive just to upload artifacts.
+
+This is a live external-service test: network errors, unavailable media, YouTube sign-in/bot restrictions, model-download failures, missing tools and invalid output fail the test. It never substitutes generated media or skips a failed download. Hosted runners may be restricted by YouTube even when local access works; use an authorized runner/network if that occurs. No browser cookies or other account credentials are configured.
 
 ## Modules
 
