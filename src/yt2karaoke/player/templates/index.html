@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#f5f5fa">
   <meta name="description" content="Your local karaoke studio. Create instrumental MP4s with synchronized lyrics and an optional original-vocal mix.">
   <title>yt2karaoke | Your karaoke studio</title>
+  <script src="{{ url_for('static', filename='theme.js') }}"></script>
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static', filename='studio.css') }}">
   <script defer src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
@@ -39,6 +40,14 @@
       <a href="#studio" class="nav-active" aria-current="page">Studio</a>
       <a href="#queue">Song queue <span class="nav-count" id="nav-count">0</span></a>
     </nav>
+    <label class="theme-control" for="theme-select">
+      <span>Theme</span>
+      <select id="theme-select" disabled>
+        <option value="system">System</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </label>
     <div class="connection" id="connection" role="status">
       <span class="connection-dot" aria-hidden="true"></span>
       <span id="connection-text">Connecting</span>

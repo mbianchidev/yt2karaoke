@@ -58,16 +58,21 @@ def studio(tmp_path):
         app.extensions["song_queue"].stop_worker()
 
 
-@pytest.fixture
-def browser_page(studio):
+@pytest.fixture(params=["light", "dark"])
+def browser_page(studio, request):
     with playwright.sync_playwright() as integration:
         browser = integration.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1440, "height": 1000}, accept_downloads=True)
+        context = browser.new_context(
+            viewport={"width": 1440, "height": 1000},
+            accept_downloads=True, color_scheme=request.param,
+        )
+        page = context.new_page()
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(studio[0])
         page.wait_for_load_state("networkidle")
         yield page, errors
+        context.close()
         browser.close()
 
 
@@ -77,6 +82,195 @@ def add_song(page, title="Original test"):
     page.get_by_label("Song title").fill(title)
     page.get_by_role("button", name="Add to queue", exact=True).click()
     page.get_by_role("button", name=f"Play {title}", exact=True).wait_for(timeout=30000)
+
+
+def expect_theme(page, theme):
+    backgrounds = {"light": "#f5f5fa", "dark": "#171722"}
+    playwright.expect(page.locator("html")).to_have_attribute("data-theme", theme)
+    playwright.expect(page.locator("html")).to_have_css("color-scheme", theme)
+    playwright.expect(page.locator('meta[name="theme-color"]')).to_have_attribute(
+        "content", backgrounds[theme],
+    )
+    expected = {"light": "rgb(245, 245, 250)", "dark": "rgb(23, 23, 34)"}
+    playwright.expect(page.locator("body")).to_have_css("background-color", expected[theme])
+
+
+def test_theme_follows_system_and_responds_to_changes(browser_page):
+    page, errors = browser_page
+    theme = page.get_by_role("combobox", name="Theme", exact=True)
+    playwright.expect(theme).to_have_value("system")
+    initial = page.evaluate("matchMedia('(prefers-color-scheme: dark)').matches")
+    expect_theme(page, "dark" if initial else "light")
+    for scheme in ("dark", "light"):
+        page.emulate_media(color_scheme=scheme)
+        expect_theme(page, scheme)
+    assert page.evaluate("localStorage.getItem('yt2karaoke-theme')") is None
+    assert not errors
+
+
+def test_theme_choice_is_keyboard_accessible_and_persists(browser_page):
+    page, errors = browser_page
+    theme = page.get_by_role("combobox", name="Theme", exact=True)
+    theme.focus()
+    theme.press("d")
+    theme.press("Enter")
+    playwright.expect(theme).to_have_value("dark")
+    expect_theme(page, "dark")
+    page.emulate_media(color_scheme="light")
+    expect_theme(page, "dark")
+    page.reload(wait_until="networkidle")
+    playwright.expect(theme).to_have_value("dark")
+    expect_theme(page, "dark")
+    theme.select_option("light")
+    page.emulate_media(color_scheme="dark")
+    expect_theme(page, "light")
+    page.reload(wait_until="networkidle")
+    playwright.expect(theme).to_have_value("light")
+    expect_theme(page, "light")
+    theme.select_option("system")
+    expect_theme(page, "dark")
+    page.emulate_media(color_scheme="light")
+    expect_theme(page, "light")
+    assert page.evaluate("localStorage.getItem('yt2karaoke-theme')") == "system"
+    assert not errors
+
+
+@pytest.mark.parametrize("preference", ["light", "dark"])
+def test_saved_theme_applies_before_the_studio_script(browser_page, preference):
+    page, errors = browser_page
+    page.evaluate("value => localStorage.setItem('yt2karaoke-theme', value)", preference)
+    page.route("**/static/studio.js", lambda route: route.fulfill(
+        content_type="application/javascript",
+        body="window.themeBeforeStudio = document.documentElement.dataset.theme;",
+    ))
+    page.reload(wait_until="networkidle")
+    assert page.evaluate("window.themeBeforeStudio") == preference
+    expect_theme(page, preference)
+    playwright.expect(page.get_by_role("combobox", name="Theme", exact=True)).to_have_value(preference)
+    assert not errors
+
+
+def test_theme_preference_syncs_between_tabs(browser_page, studio):
+    page, errors = browser_page
+    other = page.context.new_page()
+    other.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        other.goto(studio[0], wait_until="networkidle")
+        theme = page.get_by_role("combobox", name="Theme", exact=True)
+        other_theme = other.get_by_role("combobox", name="Theme", exact=True)
+        theme.select_option("dark")
+        expect_theme(other, "dark")
+        playwright.expect(other_theme).to_have_value("dark")
+        other_theme.select_option("light")
+        expect_theme(page, "light")
+        playwright.expect(theme).to_have_value("light")
+        other.evaluate("localStorage.clear()")
+        playwright.expect(theme).to_have_value("system")
+        system_dark = page.evaluate("matchMedia('(prefers-color-scheme: dark)').matches")
+        expect_theme(page, "dark" if system_dark else "light")
+    finally:
+        other.close()
+    assert not errors
+
+
+def test_theme_still_works_when_browser_storage_is_blocked(browser_page):
+    page, errors = browser_page
+    warnings = []
+    page.on("console", lambda message: warnings.append(message.text) if message.type == "warning" else None)
+    page.add_init_script("""
+        Object.defineProperty(window, "localStorage", {
+            get() { throw new DOMException("Test storage is blocked", "SecurityError"); }
+        });
+    """)
+    page.reload(wait_until="networkidle")
+    theme = page.get_by_role("combobox", name="Theme", exact=True)
+    theme.select_option("dark")
+    page.emulate_media(color_scheme="light")
+    expect_theme(page, "dark")
+    playwright.expect(page.get_by_role("alert").filter(
+        has_text="Theme changed for this page, but your browser could not save it.",
+    )).to_be_visible()
+    theme.select_option("system")
+    expect_theme(page, "light")
+    assert any("Could not read the theme preference" in message for message in warnings)
+    assert any("Could not save the theme preference" in message for message in warnings)
+    assert not errors
+
+
+def test_invalid_saved_theme_uses_the_system_preference(browser_page):
+    page, errors = browser_page
+    page.evaluate("localStorage.setItem('yt2karaoke-theme', 'invalid')")
+    page.reload(wait_until="networkidle")
+    playwright.expect(page.get_by_role("combobox", name="Theme", exact=True)).to_have_value("system")
+    system_dark = page.evaluate("matchMedia('(prefers-color-scheme: dark)').matches")
+    expect_theme(page, "dark" if system_dark else "light")
+    assert not errors
+
+
+def test_dark_theme_text_and_controls_have_accessible_contrast(browser_page):
+    page, errors = browser_page
+    page.get_by_role("combobox", name="Theme", exact=True).select_option("dark")
+    playwright.expect(page.get_by_role("button", name="Add to queue", exact=True)).to_have_css(
+        "background-color", "rgb(186, 167, 255)",
+    )
+    pairs = page.evaluate("""() => {
+        const colors = (value) => value.match(/[\\d.]+/g).map(Number);
+        const pairs = [
+            ["body", "body"], [".page-description", "body"],
+            [".panel-heading h2", ".preview-card"], [".subtle-tag", ".preview-card"],
+            ["#url-input", ".input-wrap"], ["#theme-select", "#theme-select"],
+            [".button-primary", ".button-primary"], [".button-mix", ".button-mix"],
+            [".mix-presets button[aria-pressed=true]", ".mix-presets button[aria-pressed=true]"],
+            [".mix-presets button[aria-pressed=true] span", ".mix-presets button[aria-pressed=true]"],
+            [".background-picker label:has(input:checked) small", ".background-picker label:has(input:checked)"],
+            [".export-note p > span", ".export-note"],
+            [".time-readout", ".player-controls"],
+            [".inline-error", ".source-card"], [".error-notice", ".error-notice"],
+            [".notice", ".notice"], [".button-download", ".button-download"],
+        ];
+        return pairs.map(([text, surface]) => ({
+            selector: text,
+            foreground: colors(getComputedStyle(document.querySelector(text)).color),
+            background: colors(getComputedStyle(document.querySelector(surface)).backgroundColor),
+            minimum: 4.5,
+        })).concat([".input-wrap", ".theme-control select", ".mix-presets button"].map((selector) => {
+            const style = getComputedStyle(document.querySelector(selector));
+            return {
+                selector, foreground: colors(style.borderTopColor),
+                background: colors(style.backgroundColor), minimum: 3,
+            };
+        }));
+    }""")
+
+    def luminance(rgb):
+        assert len(rgb) == 3, f"Expected an opaque color, got {rgb}"
+        channels = [value / 255 for value in rgb]
+        linear = [value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4 for value in channels]
+        return sum(value * weight for value, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+    for pair in pairs:
+        bright, dark = sorted((luminance(pair["foreground"]), luminance(pair["background"])), reverse=True)
+        ratio = (bright + 0.05) / (dark + 0.05)
+        assert ratio >= pair["minimum"], f'{pair["selector"]}: {ratio:.2f}:1 contrast'
+    assert not errors
+
+
+def test_theme_keeps_the_stage_artwork_unchanged(browser_page):
+    page, errors = browser_page
+    theme = page.get_by_role("combobox", name="Theme", exact=True)
+    stage = page.locator(
+        ".empty-stage, .empty-stage h2, .empty-stage h2 span, "
+        ".processing-overlay, .processing-overlay p, .processing-spinner, .player-controls",
+    )
+    styles = """elements => elements.map(element => {
+        const style = getComputedStyle(element);
+        return [style.color, style.backgroundColor, style.backgroundImage, style.borderTopColor, style.accentColor];
+    })"""
+    theme.select_option("light")
+    light = stage.evaluate_all(styles)
+    theme.select_option("dark")
+    assert stage.evaluate_all(styles) == light
+    assert not errors
 
 
 def test_initial_studio_and_keyboard_mix(browser_page):
@@ -171,13 +365,14 @@ def test_validation_failure_and_recovery(browser_page):
     assert not errors
 
 
-@pytest.mark.parametrize("width", [390, 768, 1440])
+@pytest.mark.parametrize("width", [320, 390, 600, 768, 1440])
 def test_responsive_layout(browser_page, width):
     page, errors = browser_page
     page.set_viewport_size({"width": width, "height": 900})
     page.wait_for_load_state("networkidle")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     assert page.get_by_role("button", name="Add to queue", exact=True).is_visible()
+    assert page.get_by_role("combobox", name="Theme", exact=True).is_visible()
     assert not errors
 
 
