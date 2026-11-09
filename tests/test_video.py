@@ -1,253 +1,138 @@
-"""Tests for yt2karaoke.video (build_video)."""
+"""FFmpeg command, validation, atomic output, and resource lifecycle tests."""
 
-from __future__ import annotations
-
-import sys
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from yt2karaoke.video import VideoError, build_video
+from yt2karaoke.video import VideoError, build_video, remix_video
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+@pytest.fixture
+def encoder():
+    process = MagicMock()
+    process.stdin.closed = False
+    process.stdin.write.side_effect = lambda data: len(data)
+    process.stdin.close.side_effect = lambda: setattr(process.stdin, "closed", True)
+    process.poll.return_value = None
 
-def _make_mock_audio_clip(duration: float = 3.0):
-    clip = MagicMock()
-    clip.duration = duration
-    clip.volumex = MagicMock(return_value=MagicMock(close=MagicMock()))
-    clip.close = MagicMock()
-    return clip
+    def wait(**kwargs):
+        process.poll.return_value = 0
+        return 0
+
+    process.wait.side_effect = wait
+
+    def start(command, **kwargs):
+        Path(command[-1]).write_bytes(b"encoded fixture")
+        return process
+
+    probe = MagicMock(returncode=0, stdout="2.0\n", stderr="")
+    with patch("yt2karaoke.video.subprocess.run", return_value=probe) as inspect, \
+         patch("yt2karaoke.video.subprocess.Popen", side_effect=start) as popen:
+        yield process, popen, inspect
 
 
-def _make_mock_video_clip():
-    clip = MagicMock()
-    clip.set_fps = MagicMock(return_value=clip)
-    clip.set_audio = MagicMock(return_value=clip)
-    clip.write_videofile = MagicMock()
-    clip.close = MagicMock()
-    return clip
+def test_instrumental_render_has_no_original_voice(tmp_path, encoder):
+    process, popen, _ = encoder
+    output = build_video(tmp_path / "instrumental.wav", [], tmp_path / "out.mp4", width=64, height=36, fps=2)
+    assert output.read_bytes() == b"encoded fixture"
+    command = popen.call_args.args[0]
+    assert "-filter_complex" not in command
+    assert command[command.index("-pix_fmt") + 1] == "yuv420p"
+    assert command[command.index("-c:v") + 1] == "libx264"
+    assert command[command.index("-c:a") + 1] == "aac"
+    assert process.stdin.write.call_count == 4
+    assert process.stdin.closed
+    process.terminate.assert_not_called()
 
 
-def _patch_moviepy(inst_clip, video_clip, composite_clip=None, vocals_raw_clip=None):
-    """Return a mock ``moviepy.editor`` module suitable for patching."""
-    mock_editor = MagicMock()
-
-    if vocals_raw_clip is not None:
-        def audio_file_clip_factory(path):
-            if "vocals" in str(path):
-                return vocals_raw_clip
-            return inst_clip
-        mock_editor.AudioFileClip = MagicMock(side_effect=audio_file_clip_factory)
-    else:
-        mock_editor.AudioFileClip = MagicMock(return_value=inst_clip)
-
-    mock_editor.VideoClip = MagicMock(return_value=video_clip)
-    mock_editor.CompositeAudioClip = MagicMock(
-        return_value=composite_clip if composite_clip is not None else MagicMock()
+def test_render_scales_original_voice_once(tmp_path, encoder):
+    _, popen, _ = encoder
+    build_video(
+        tmp_path / "instrumental.wav", [], tmp_path / "out.mp4",
+        vocals_path=tmp_path / "vocals.wav", vocals_volume=0.25,
+        width=64, height=36, fps=2,
     )
-    return mock_editor
+    command = popen.call_args.args[0]
+    audio_filter = command[command.index("-filter_complex") + 1]
+    assert "volume=0.25" in audio_filter
+    assert audio_filter.count("volume=") == 1
+    assert "normalize=0" in audio_filter
+    assert "latency=true" in audio_filter
 
 
-# ---------------------------------------------------------------------------
-# ImportError path
-# ---------------------------------------------------------------------------
-
-def test_build_video_raises_video_error_when_moviepy_missing(tmp_path):
-    """VideoError is raised when moviepy cannot be imported."""
-    output_path = tmp_path / "karaoke.mp4"
-    instrumental_path = tmp_path / "inst.wav"
-    instrumental_path.touch()
-
-    broken_modules = {k: v for k, v in sys.modules.items()}
-    broken_modules["moviepy"] = None
-    broken_modules["moviepy.editor"] = None
-
-    with patch.dict(sys.modules, broken_modules):
-        with pytest.raises(VideoError, match="moviepy is not installed"):
-            build_video(instrumental_path, [], output_path)
+def test_render_reports_frame_progress(tmp_path, encoder):
+    progress = []
+    build_video(
+        tmp_path / "instrumental.wav", [], tmp_path / "out.mp4",
+        width=64, height=36, fps=2, on_progress=progress.append,
+    )
+    assert progress == [0, 0.25, 0.5, 0.75, 1]
 
 
-# ---------------------------------------------------------------------------
-# Happy path — instrumental only (no vocals)
-# ---------------------------------------------------------------------------
-
-def test_build_video_instrumental_only(tmp_path):
-    """build_video returns the output path when no vocals are provided."""
-    output_path = tmp_path / "karaoke.mp4"
-    instrumental_path = tmp_path / "instrumental.wav"
-    instrumental_path.touch()
-
-    inst_clip = _make_mock_audio_clip(duration=5.0)
-    video_clip = _make_mock_video_clip()
-    mock_editor = _patch_moviepy(inst_clip, video_clip)
-
-    with patch.dict(sys.modules, {"moviepy.editor": mock_editor}):
-        result = build_video(
-            instrumental_path,
-            [],
-            output_path,
-            width=64,
-            height=36,
-            fps=5.0,
-        )
-
-    assert result == output_path
-    # No CompositeAudioClip needed — single audio track
-    mock_editor.CompositeAudioClip.assert_not_called()
+def test_missing_ffprobe_is_actionable(tmp_path):
+    with patch("yt2karaoke.video.subprocess.run", side_effect=FileNotFoundError):
+        with pytest.raises(VideoError, match="ffprobe was not found"):
+            build_video(tmp_path / "input.wav", [], tmp_path / "out.mp4")
 
 
-# ---------------------------------------------------------------------------
-# Vocals mixing — volumex applied with correct gain
-# ---------------------------------------------------------------------------
-
-def test_build_video_applies_vocals_volume(tmp_path):
-    """When vocals_path is given, AudioFileClip.volumex is called with vocals_volume."""
-    output_path = tmp_path / "out.mp4"
-    instrumental_path = tmp_path / "inst.wav"
-    vocals_path = tmp_path / "vocals.wav"
-    instrumental_path.touch()
-    vocals_path.touch()
-
-    inst_clip = _make_mock_audio_clip(duration=3.0)
-    vocals_raw_clip = MagicMock()
-    vocals_scaled_clip = MagicMock(close=MagicMock())
-    vocals_raw_clip.volumex = MagicMock(return_value=vocals_scaled_clip)
-    video_clip = _make_mock_video_clip()
-    mock_editor = _patch_moviepy(inst_clip, video_clip, vocals_raw_clip=vocals_raw_clip)
-
-    with patch.dict(sys.modules, {"moviepy.editor": mock_editor}):
-        build_video(
-            instrumental_path,
-            [],
-            output_path,
-            width=64,
-            height=36,
-            fps=5.0,
-            vocals_path=vocals_path,
-            vocals_volume=0.5,
-        )
-
-    vocals_raw_clip.volumex.assert_called_once_with(0.5)
-    mock_editor.CompositeAudioClip.assert_called_once()
+def test_missing_ffmpeg_is_actionable(tmp_path, encoder):
+    with patch("yt2karaoke.video.subprocess.Popen", side_effect=FileNotFoundError):
+        with pytest.raises(VideoError, match="ffmpeg was not found"):
+            build_video(tmp_path / "input.wav", [], tmp_path / "out.mp4")
+    assert not list(tmp_path.glob(".render_*"))
 
 
-# ---------------------------------------------------------------------------
-# Resource cleanup — clips are closed
-# ---------------------------------------------------------------------------
-
-def test_build_video_closes_clips_after_write(tmp_path):
-    """Instrumental and video clips are closed in the finally block."""
-    output_path = tmp_path / "out.mp4"
-    instrumental_path = tmp_path / "inst.wav"
-    instrumental_path.touch()
-
-    inst_clip = _make_mock_audio_clip(duration=2.0)
-    video_clip = _make_mock_video_clip()
-    mock_editor = _patch_moviepy(inst_clip, video_clip)
-
-    with patch.dict(sys.modules, {"moviepy.editor": mock_editor}):
-        build_video(
-            instrumental_path,
-            [],
-            output_path,
-            width=64,
-            height=36,
-            fps=5.0,
-        )
-
-    inst_clip.close.assert_called_once()
-    video_clip.close.assert_called_once()
+@pytest.mark.parametrize("duration", ["0", "-1", "nan", "inf", "unknown"])
+def test_invalid_audio_duration_is_rejected(tmp_path, encoder, duration):
+    _, popen, inspect = encoder
+    inspect.return_value.stdout = duration
+    with pytest.raises(VideoError, match="duration"):
+        build_video(tmp_path / "input.wav", [], tmp_path / "out.mp4")
+    popen.assert_not_called()
 
 
-def test_build_video_closes_vocals_clip_after_write(tmp_path):
-    """The vocals clip is closed in the finally block when provided."""
-    output_path = tmp_path / "out.mp4"
-    instrumental_path = tmp_path / "inst.wav"
-    vocals_path = tmp_path / "vocals.wav"
-    instrumental_path.touch()
-    vocals_path.touch()
-
-    inst_clip = _make_mock_audio_clip(duration=2.0)
-    vocals_raw_clip = MagicMock()
-    vocals_scaled_clip = MagicMock(close=MagicMock())
-    vocals_raw_clip.volumex = MagicMock(return_value=vocals_scaled_clip)
-    video_clip = _make_mock_video_clip()
-    mock_editor = _patch_moviepy(inst_clip, video_clip, vocals_raw_clip=vocals_raw_clip)
-
-    with patch.dict(sys.modules, {"moviepy.editor": mock_editor}):
-        build_video(
-            instrumental_path,
-            [],
-            output_path,
-            width=64,
-            height=36,
-            fps=5.0,
-            vocals_path=vocals_path,
-            vocals_volume=0.8,
-        )
-
-    vocals_scaled_clip.close.assert_called_once()
+def test_invalid_audio_is_actionable(tmp_path, encoder):
+    encoder[2].return_value.returncode = 1
+    encoder[2].return_value.stderr = "invalid audio data"
+    with pytest.raises(VideoError, match="invalid audio data"):
+        build_video(tmp_path / "input.wav", [], tmp_path / "out.mp4")
 
 
-# ---------------------------------------------------------------------------
-# Error handling — write failure raises VideoError
-# ---------------------------------------------------------------------------
-
-def test_build_video_raises_on_write_failure(tmp_path):
-    """A failed write_videofile call raises VideoError."""
-    output_path = tmp_path / "out.mp4"
-    instrumental_path = tmp_path / "inst.wav"
-    instrumental_path.touch()
-
-    inst_clip = _make_mock_audio_clip(duration=2.0)
-    video_clip = _make_mock_video_clip()
-    video_clip.write_videofile.side_effect = RuntimeError("encoder error")
-    mock_editor = _patch_moviepy(inst_clip, video_clip)
-
-    with patch.dict(sys.modules, {"moviepy.editor": mock_editor}):
-        with pytest.raises(VideoError, match="Failed to write video"):
-            build_video(
-                instrumental_path,
-                [],
-                output_path,
-                width=64,
-                height=36,
-                fps=5.0,
-            )
+@pytest.mark.parametrize("kwargs", [
+    {"width": 63}, {"height": 35}, {"fps": 0}, {"fps": float("nan")},
+    {"font_size": 0}, {"visual_style": "unknown"}, {"vocals_volume": 0.25},
+])
+def test_invalid_render_options_fail_before_encoding(tmp_path, kwargs):
+    with pytest.raises(VideoError):
+        build_video(tmp_path / "input.wav", [], tmp_path / "out.mp4", **kwargs)
 
 
-# ---------------------------------------------------------------------------
-# Error handling — vocals load failure raises VideoError
-# ---------------------------------------------------------------------------
+def test_frame_error_stops_owned_encoder_and_keeps_existing_output(tmp_path, encoder):
+    process, _, _ = encoder
+    output = tmp_path / "out.mp4"
+    output.write_bytes(b"previous successful export")
+    with patch("yt2karaoke.video._FrameGenerator.make_frame", side_effect=ValueError("frame failed")):
+        with pytest.raises(ValueError, match="frame failed"):
+            build_video(tmp_path / "input.wav", [], output, width=64, height=36, fps=2)
+    assert output.read_bytes() == b"previous successful export"
+    process.terminate.assert_called_once()
+    assert process.stdin.closed
+    assert not list(tmp_path.glob(".render_*"))
 
-def test_build_video_raises_on_vocals_load_failure(tmp_path):
-    """A failed vocals AudioFileClip load raises VideoError."""
-    output_path = tmp_path / "out.mp4"
-    instrumental_path = tmp_path / "inst.wav"
-    vocals_path = tmp_path / "vocals.wav"
-    instrumental_path.touch()
-    vocals_path.touch()
 
-    inst_clip = _make_mock_audio_clip(duration=2.0)
-    vocals_raw_clip = MagicMock()
-    vocals_raw_clip.volumex.side_effect = OSError("file not found")
-    video_clip = _make_mock_video_clip()
-    mock_editor = _patch_moviepy(inst_clip, video_clip, vocals_raw_clip=vocals_raw_clip)
+def test_broken_pipe_reports_encoder_error(tmp_path, encoder):
+    process, popen, _ = encoder
+    process.stdin.write.side_effect = BrokenPipeError("encoder stopped")
+    with pytest.raises(VideoError, match="encoder stopped"):
+        build_video(tmp_path / "input.wav", [], tmp_path / "out.mp4", width=64, height=36, fps=2)
+    assert process.stdin.closed
+    assert not list(tmp_path.glob(".render_*"))
 
-    with patch.dict(sys.modules, {"moviepy.editor": mock_editor}):
-        with pytest.raises(VideoError, match="Failed to load vocals audio"):
-            build_video(
-                instrumental_path,
-                [],
-                output_path,
-                width=64,
-                height=36,
-                fps=5.0,
-                vocals_path=vocals_path,
-                vocals_volume=0.5,
-            )
+
+def test_mix_never_overwrites_instrumental(tmp_path):
+    video = tmp_path / "original.mp4"
+    video.write_bytes(b"original")
+    with pytest.raises(VideoError, match="must not overwrite"):
+        remix_video(video, tmp_path / "instrumental.wav", tmp_path / "vocals.wav", video, 0.25)
+    assert video.read_bytes() == b"original"

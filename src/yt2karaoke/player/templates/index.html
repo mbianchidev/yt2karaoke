@@ -1,553 +1,197 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>yt2karaoke</title>
-  <style>
-    /* ------------------------------------------------------------------ */
-    /* Reset & base                                                         */
-    /* ------------------------------------------------------------------ */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg:        #0d0d1a;
-      --surface:   #13132b;
-      --border:    #2a2a55;
-      --accent:    #8a2be2;
-      --accent2:   #00d4ff;
-      --text:      #e8e8ff;
-      --muted:     #7070a0;
-      --ready:     #00e676;
-      --error:     #ff4444;
-      --queued:    #ffb300;
-    }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Header                                                               */
-    /* ------------------------------------------------------------------ */
-    header {
-      background: linear-gradient(135deg, #1a0033 0%, #000d2a 100%);
-      border-bottom: 1px solid var(--border);
-      padding: 1rem 2rem;
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    header h1 {
-      font-size: 1.6rem;
-      background: linear-gradient(90deg, var(--accent), var(--accent2));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      letter-spacing: 1px;
-    }
-
-    header .tagline {
-      color: var(--muted);
-      font-size: 0.85rem;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Layout                                                               */
-    /* ------------------------------------------------------------------ */
-    .container {
-      display: grid;
-      grid-template-columns: 1fr 360px;
-      gap: 1.5rem;
-      padding: 1.5rem;
-      flex: 1;
-    }
-
-    @media (max-width: 900px) {
-      .container { grid-template-columns: 1fr; }
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Player pane                                                          */
-    /* ------------------------------------------------------------------ */
-    .player-pane {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    #video-wrapper {
-      position: relative;
-      width: 100%;
-      aspect-ratio: 16/9;
-      background: #000;
-      border-radius: 12px;
-      overflow: hidden;
-      border: 1px solid var(--border);
-    }
-
-    #main-video {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-    }
-
-    #no-video-placeholder {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      color: var(--muted);
-    }
-
-    #no-video-placeholder .icon { font-size: 4rem; }
-
-    .now-playing {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 1rem 1.25rem;
-    }
-
-    .now-playing .label {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: var(--muted);
-      margin-bottom: 0.3rem;
-    }
-
-    .now-playing .song-title {
-      font-size: 1.1rem;
-      font-weight: 600;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Queue pane                                                           */
-    /* ------------------------------------------------------------------ */
-    .queue-pane {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .panel {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1.25rem;
-    }
-
-    .panel h2 {
-      font-size: 0.9rem;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: var(--muted);
-      margin-bottom: 1rem;
-    }
-
-    /* Add song form */
-    .add-form { display: flex; flex-direction: column; gap: 0.6rem; }
-
-    .add-form input {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: var(--text);
-      padding: 0.6rem 0.9rem;
-      font-size: 0.9rem;
-      width: 100%;
-      transition: border-color 0.2s;
-    }
-
-    .add-form input:focus {
-      outline: none;
-      border-color: var(--accent);
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.4rem;
-      padding: 0.6rem 1.2rem;
-      border: none;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: opacity 0.15s, transform 0.1s;
-    }
-
-    .btn:active { transform: scale(0.97); }
-    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-
-    .btn-primary {
-      background: linear-gradient(135deg, var(--accent), #5500aa);
-      color: #fff;
-    }
-
-    .btn-sm {
-      padding: 0.25rem 0.5rem;
-      font-size: 0.75rem;
-      border-radius: 5px;
-    }
-
-    .btn-ghost {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--muted);
-    }
-
-    .btn-ghost:hover { border-color: var(--accent2); color: var(--accent2); }
-
-    /* Queue list */
-    #queue-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 55vh; overflow-y: auto; }
-
-    .queue-item {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0.5rem 0.75rem;
-      transition: border-color 0.2s;
-    }
-
-    .queue-item:hover { border-color: var(--accent); }
-
-    .queue-item .song-name {
-      flex: 1;
-      font-size: 0.88rem;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-
-    .status-dot.READY      { background: var(--ready); }
-    .status-dot.QUEUED     { background: var(--queued); }
-    .status-dot.ERROR      { background: var(--error); }
-    .status-dot.PROCESSING,
-    .status-dot.DOWNLOADING { background: var(--accent2); animation: pulse 1s infinite; }
-    .status-dot.PLAYING    { background: var(--accent); animation: pulse 0.6s infinite; }
-    .status-dot.DONE       { background: var(--muted); }
-
-    @keyframes pulse {
-      0%,100% { opacity: 1; }
-      50%      { opacity: 0.3; }
-    }
-
-    .queue-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
-
-    .empty-queue {
-      text-align: center;
-      color: var(--muted);
-      font-size: 0.88rem;
-      padding: 1.5rem 0;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Toast notifications                                                  */
-    /* ------------------------------------------------------------------ */
-    #toast-container {
-      position: fixed;
-      bottom: 1.5rem;
-      right: 1.5rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-      z-index: 9999;
-    }
-
-    .toast {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0.7rem 1.2rem;
-      font-size: 0.875rem;
-      opacity: 0;
-      transform: translateX(30px);
-      transition: all 0.3s;
-      pointer-events: none;
-    }
-
-    .toast.show { opacity: 1; transform: translateX(0); }
-    .toast.error { border-color: var(--error); color: var(--error); }
-    .toast.success { border-color: var(--ready); color: var(--ready); }
-
-    /* ------------------------------------------------------------------ */
-    /* Connection indicator                                                 */
-    /* ------------------------------------------------------------------ */
-    #conn-indicator {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--error);
-      transition: background 0.3s;
-      flex-shrink: 0;
-    }
-    #conn-indicator.connected { background: var(--ready); }
-  </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f5fa">
+  <meta name="description" content="Your local karaoke studio. Create instrumental MP4s with synchronized lyrics and an optional original-vocal mix.">
+  <title>yt2karaoke | Your karaoke studio</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='studio.css') }}">
+  <script defer src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='studio.js') }}"></script>
 </head>
-<body>
+<body data-default-vocals="{{ default_vocals_volume }}" data-default-style="{{ default_visual_style }}">
+  <svg class="icon-library" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m9 5 11 7-11 7Z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="m11 5-5 4H3v6h3l5 4ZM15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-remove" viewBox="0 0 24 24"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7m4-7v7"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 13 3M5 15a8 8 0 0 0 13 3"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="3"/><ellipse cx="17" cy="16" rx="3" ry="3"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+  </svg>
+  <a href="#studio" class="skip-link">Skip to studio</a>
 
-<header>
-  <div id="conn-indicator" title="WebSocket connection"></div>
-  <h1>🎤 yt2karaoke</h1>
-  <span class="tagline">Turn any YouTube link into a karaoke experience</span>
-</header>
+  <header class="masthead">
+    <a href="/" class="brand" aria-label="yt2karaoke home">
+      <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+      <span>yt2<span class="brand-light">karaoke</span><span class="brand-period">.</span></span>
+    </a>
+    <nav class="workspace-nav" aria-label="Workspace">
+      <a href="#studio" class="nav-active" aria-current="page">Studio</a>
+      <a href="#queue">Song queue <span class="nav-count" id="nav-count">0</span></a>
+    </nav>
+    <div class="connection" id="connection" role="status">
+      <span class="connection-dot" aria-hidden="true"></span>
+      <span id="connection-text">Connecting</span>
+    </div>
+  </header>
 
-<div class="container">
-
-  <!-- Left: Player -->
-  <section class="player-pane">
-    <div id="video-wrapper">
-      <video id="main-video" controls style="display:none;"></video>
-      <div id="no-video-placeholder">
-        <span class="icon">🎵</span>
-        <span>Add a song to the queue to get started</span>
+  <main id="studio" class="workspace">
+    <div class="page-heading">
+      <div>
+        <p class="eyebrow">YOUR KARAOKE STUDIO</p>
+        <h1>Make room for your voice.</h1>
+        <p class="page-description">A backing track, lyrics that keep up, and the mic all to yourself.</p>
       </div>
+      <span class="local-note"><span class="small-orbit" aria-hidden="true"></span> No account. Just music.</span>
     </div>
 
-    <div class="now-playing">
-      <div class="label">Now playing</div>
-      <div class="song-title" id="now-playing-title">—</div>
-    </div>
-  </section>
-
-  <!-- Right: Queue -->
-  <aside class="queue-pane">
-
-    <!-- Add song -->
-    <div class="panel">
-      <h2>Add Song</h2>
-      <form class="add-form" id="add-form" onsubmit="addSong(event)">
-        <input
-          type="url"
-          id="url-input"
-          placeholder="https://youtube.com/watch?v=..."
-          required
-        />
-        <input
-          type="text"
-          id="title-input"
-          placeholder="Title (optional)"
-        />
-        <button type="submit" class="btn btn-primary" id="add-btn">
-          ➕ Add to Queue
-        </button>
+    <section class="source-card" aria-labelledby="source-heading">
+      <div class="source-header">
+        <h2 id="source-heading">Start with a song</h2>
+        <fieldset class="source-switch">
+          <legend class="sr-only">Song source</legend>
+          <label><input type="radio" name="source-mode" value="youtube" checked> YouTube link</label>
+          <label><input type="radio" name="source-mode" value="upload"> Local file</label>
+        </fieldset>
+      </div>
+      <form id="add-form">
+        <div class="source-entry">
+          <div id="youtube-fields" class="input-wrap">
+            <label class="sr-only" for="url-input">YouTube URL</label>
+            <svg class="icon" aria-hidden="true"><use href="#i-music"/></svg>
+            <input type="url" id="url-input" placeholder="Paste a YouTube video link..." required aria-describedby="source-help">
+          </div>
+          <div id="upload-fields" class="upload-wrap" hidden>
+            <label class="sr-only" for="audio-input">Audio or video file</label>
+            <input type="file" id="audio-input" accept=".wav,.mp3,.flac,.m4a,.ogg,.aac,.mp4,.webm,.aiff,.aif" disabled aria-describedby="source-help">
+          </div>
+          <button type="submit" class="button button-primary" id="add-btn" disabled>
+            <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
+            <span>Add to queue</span>
+          </button>
+        </div>
+        <div class="source-foot">
+          <p id="source-help">Use audio you are authorized to process. We'll separate the vocals and sync the lyrics.</p>
+          <details class="optional-settings" id="optional-settings">
+            <summary>Optional settings</summary>
+            <div class="optional-fields">
+              <label for="title-input">Song title<input id="title-input" type="text" maxlength="200" placeholder="Leave blank to detect the title"></label>
+              <label id="lyrics-upload-label" for="lyrics-input" hidden>Timed lyrics JSON
+                <input id="lyrics-input" type="file" accept=".json" disabled aria-describedby="lyrics-help">
+                <span id="lyrics-help">Optional. Use your own word timestamps instead of automatic transcription.</span>
+              </label>
+            </div>
+          </details>
+        </div>
+        <p id="form-error" class="inline-error" role="alert" hidden></p>
       </form>
+    </section>
+
+    <div class="studio-grid">
+      <section class="preview-card" aria-labelledby="preview-heading">
+        <div class="panel-heading">
+          <h2 id="preview-heading">Stage preview</h2>
+          <span class="subtle-tag" id="preview-tag">Waiting for your song</span>
+        </div>
+        <div class="stage-shell" id="stage-shell">
+          <div class="video-wrapper" id="video-wrapper" data-style="plasma">
+            <video id="main-video" controls preload="metadata" playsinline hidden aria-label="Karaoke video"></video>
+            <div class="empty-stage" id="no-video-placeholder">
+              <div class="stage-orbit" aria-hidden="true"></div>
+              <span class="stage-label">THE STAGE IS YOURS</span>
+              <h2>Your voice.<br><span>Front and center.</span></h2>
+              <p>Your lyrics will light up here.</p>
+              <span class="stage-format">LYRICS IN SYNC <span aria-hidden="true">/</span> MP4</span>
+            </div>
+            <div class="processing-overlay" id="processing-overlay" role="status" hidden>
+              <span class="processing-spinner" aria-hidden="true"></span>
+              <h3 id="processing-title">Preparing your song</h3>
+              <p id="processing-description">Your karaoke video is on its way.</p>
+              <progress id="processing-progress" max="100" value="0" aria-label="Song processing progress"></progress>
+            </div>
+          </div>
+          <div class="player-controls">
+            <button type="button" class="icon-button play-toggle" id="play-toggle" aria-label="Play song" disabled><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg></button>
+            <span class="time-readout" id="elapsed-time">0:00</span>
+            <label class="sr-only" for="seek-input">Seek through song</label>
+            <input type="range" class="seek-input" id="seek-input" min="0" max="1000" value="0" disabled>
+            <span class="time-readout" id="duration-time">0:00</span>
+            <svg class="icon volume-icon" aria-hidden="true"><use href="#i-volume"/></svg>
+            <label class="sr-only" for="volume-input">Playback volume</label>
+            <input type="range" class="volume-input" id="volume-input" min="0" max="100" value="80">
+            <button type="button" class="icon-button" id="fullscreen-btn" aria-label="Full screen" disabled><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg></button>
+          </div>
+        </div>
+        <div class="now-playing">
+          <span class="track-art" aria-hidden="true"><svg class="icon"><use href="#i-music"/></svg></span>
+          <div class="track-info">
+            <p class="track-eyebrow" id="now-playing-label">ON THE STAGE</p>
+            <h3 id="now-playing-title">No song selected</h3>
+            <p id="now-playing-meta">Your instrumental will appear here.</p>
+          </div>
+          <a class="button button-download" id="download-instrumental" hidden><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Download instrumental MP4</a>
+        </div>
+        <details class="lyric-details" id="lyric-details" hidden>
+          <summary>View synced lyrics</summary>
+          <ol id="lyric-list" aria-label="Synced lyrics"></ol>
+        </details>
+      </section>
+
+      <aside class="mixer-card" aria-labelledby="mixer-heading">
+        <div class="panel-heading">
+          <h2 id="mixer-heading">Your mix</h2>
+          <span class="subtle-tag">VOCAL GUIDE</span>
+        </div>
+        <div class="mixer-body">
+          <label class="toggle-label" for="vocals-enabled"><span>Add original vocals</span><input type="checkbox" id="vocals-enabled" aria-describedby="mix-help"></label>
+          <div class="vocal-readout"><output id="vocals-value" for="vocals-input">0<span>%</span></output><span>original voice<br>in the mix</span></div>
+          <label class="sr-only" for="vocals-input">Original vocals</label>
+          <input type="range" id="vocals-input" min="0" max="100" step="1" value="0" disabled aria-describedby="mix-help">
+          <div class="range-labels" aria-hidden="true"><span>Just you</span><span>Original voice</span></div>
+          <div class="mix-presets" aria-label="Vocal presets">
+            <button type="button" data-volume="0" aria-label="Instrumental, 0% vocals" aria-pressed="true">Instrumental<span>0%</span></button>
+            <button type="button" data-volume="25" aria-label="Light guide, 25% vocals" aria-pressed="false">Light guide<span>25%</span></button>
+            <button type="button" data-volume="50" aria-label="Sing along, 50% vocals" aria-pressed="false">Sing along<span>50%</span></button>
+          </div>
+          <p class="mix-help" id="mix-help">Instrumental only. Your voice does the rest.</p>
+          <button type="button" class="button button-mix" id="apply-mix" disabled>Use instrumental<svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+          <p id="mix-error" class="inline-error" role="alert" hidden></p>
+          <a id="download-mix" class="mix-download" hidden><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span></span></a>
+          <div class="mixer-divider"></div>
+          <fieldset class="background-picker">
+            <legend>Video background</legend>
+            <label><input type="radio" name="visual-style" value="plasma" checked><span class="style-swatch style-plasma" aria-hidden="true"></span><span>Plasma waves<small>Colorful &amp; flowing</small></span></label>
+            <label><input type="radio" name="visual-style" value="gradient"><span class="style-swatch style-gradient" aria-hidden="true"></span><span>Color drift<small>Soft &amp; slow-moving</small></span></label>
+          </fieldset>
+          <p class="background-help">Background settings apply to new songs.</p>
+          <div class="export-note"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><p><strong>One video. Ready to sing.</strong><span>Lyrics are baked into the MP4. Your instrumental export stays untouched.</span></p></div>
+          <a id="download-lyrics" class="lyrics-download" hidden>Download timed lyrics <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg></a>
+        </div>
+      </aside>
     </div>
 
-    <!-- Queue list -->
-    <div class="panel" style="flex:1;">
-      <h2>Queue</h2>
-      <div id="queue-list"></div>
-    </div>
-
-  </aside>
-</div>
-
-<!-- Toast container -->
-<div id="toast-container"></div>
-
-<script src="/socket.io/socket.io.js"></script>
-<script>
-// ------------------------------------------------------------------ //
-// State                                                                //
-// ------------------------------------------------------------------ //
-let currentSongId = null;
-
-// ------------------------------------------------------------------ //
-// SocketIO                                                             //
-// ------------------------------------------------------------------ //
-const socket = io();
-
-socket.on('connect', () => {
-  document.getElementById('conn-indicator').classList.add('connected');
-});
-
-socket.on('disconnect', () => {
-  document.getElementById('conn-indicator').classList.remove('connected');
-});
-
-socket.on('queue_update', (songs) => {
-  renderQueue(songs);
-  // Auto-play first READY song if nothing is playing
-  autoPlay(songs);
-});
-
-// ------------------------------------------------------------------ //
-// Queue rendering                                                      //
-// ------------------------------------------------------------------ //
-function renderQueue(songs) {
-  const list = document.getElementById('queue-list');
-  if (!songs || songs.length === 0) {
-    list.innerHTML = '<div class="empty-queue">Queue is empty — add a YouTube URL above</div>';
-    return;
-  }
-
-  list.innerHTML = songs.map(s => `
-    <div class="queue-item" id="qi-${escHtml(s.id)}"
-         data-id="${escHtml(s.id)}"
-         data-title="${escHtml(s.title || s.url)}"
-         data-status="${escHtml(s.status)}">
-      <div class="status-dot ${escHtml(s.status)}" title="${escHtml(s.status)}"></div>
-      <span class="song-name" title="${escHtml(s.title || s.url)}">${escHtml(s.title || s.url)}</span>
-      <div class="queue-actions">
-        ${s.status === 'READY' ? `<button class="btn btn-sm btn-primary action-play" title="Play">▶</button>` : ''}
-        ${s.status === 'QUEUED' ? `
-          <button class="btn btn-sm btn-ghost action-up" title="Move up">↑</button>
-          <button class="btn btn-sm btn-ghost action-down" title="Move down">↓</button>
-          <button class="btn btn-sm btn-ghost action-remove" title="Remove">✕</button>
-        ` : ''}
-        ${s.status === 'ERROR' ? `<span title="${escHtml(s.error || '')}" style="color:var(--error);font-size:0.75rem;">⚠ Error</span>` : ''}
+    <section class="queue-card" id="queue" aria-labelledby="queue-heading">
+      <div class="queue-heading">
+        <div><h2 id="queue-heading">Up next <span id="queue-count">0 songs</span></h2><p>One song at a time. A whole night ahead.</p></div>
+        <button type="button" class="button button-quiet" id="refresh-btn"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh queue</button>
       </div>
-    </div>
-  `).join('');
-
-  // Attach event listeners using data attributes (no inline onclick interpolation)
-  list.querySelectorAll('.queue-item').forEach(item => {
-    const id    = item.dataset.id;
-    const title = item.dataset.title;
-    item.querySelector('.action-play')?.addEventListener('click', () => playSong(id, title));
-    item.querySelector('.action-up')?.addEventListener('click',   () => moveUp(id));
-    item.querySelector('.action-down')?.addEventListener('click', () => moveDown(id));
-    item.querySelector('.action-remove')?.addEventListener('click', () => removeSong(id));
-  });
-}
-
-function autoPlay(songs) {
-  if (currentSongId) return; // already playing
-  const ready = songs.find(s => s.status === 'READY');
-  if (ready) playSong(ready.id, ready.title || ready.url);
-}
-
-// ------------------------------------------------------------------ //
-// Player                                                               //
-// ------------------------------------------------------------------ //
-function playSong(id, title) {
-  const video = document.getElementById('main-video');
-  const placeholder = document.getElementById('no-video-placeholder');
-  const nowPlaying = document.getElementById('now-playing-title');
-
-  currentSongId = id;
-  video.src = `/video/${id}`;
-  video.style.display = 'block';
-  placeholder.style.display = 'none';
-  nowPlaying.textContent = title || id;
-  video.play().catch(() => {});
-
-  video.onended = () => {
-    // Play next ready song automatically
-    fetch('/api/queue').then(r => r.json()).then(songs => {
-      const idx = songs.findIndex(s => s.id === id);
-      const next = songs.slice(idx + 1).find(s => s.status === 'READY');
-      if (next) {
-        playSong(next.id, next.title || next.url);
-      } else {
-        currentSongId = null;
-        video.style.display = 'none';
-        placeholder.style.display = 'flex';
-        nowPlaying.textContent = '—';
-      }
-    });
-  };
-}
-
-// ------------------------------------------------------------------ //
-// Queue actions                                                        //
-// ------------------------------------------------------------------ //
-async function addSong(event) {
-  event.preventDefault();
-  const url = document.getElementById('url-input').value.trim();
-  const title = document.getElementById('title-input').value.trim();
-  if (!url) return;
-
-  const btn = document.getElementById('add-btn');
-  btn.disabled = true;
-  btn.textContent = 'Adding…';
-
-  try {
-    const resp = await fetch('/api/queue', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, title })
-    });
-
-    if (resp.ok) {
-      document.getElementById('url-input').value = '';
-      document.getElementById('title-input').value = '';
-      toast('Song added to queue!', 'success');
-    } else {
-      const err = await resp.json().catch(() => ({ description: 'Unknown error' }));
-      toast(err.description || 'Failed to add song', 'error');
-    }
-  } catch (e) {
-    toast('Network error', 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '➕ Add to Queue';
-  }
-}
-
-async function removeSong(id) {
-  await fetch(`/api/queue/${id}`, { method: 'DELETE' });
-}
-
-async function moveUp(id) {
-  await fetch(`/api/queue/${id}/up`, { method: 'POST' });
-}
-
-async function moveDown(id) {
-  await fetch(`/api/queue/${id}/down`, { method: 'POST' });
-}
-
-// ------------------------------------------------------------------ //
-// Toast                                                                //
-// ------------------------------------------------------------------ //
-function toast(message, type = 'info') {
-  const container = document.getElementById('toast-container');
-  const el = document.createElement('div');
-  el.className = `toast ${type}`;
-  el.textContent = message;
-  container.appendChild(el);
-  requestAnimationFrame(() => { requestAnimationFrame(() => el.classList.add('show')); });
-  setTimeout(() => {
-    el.classList.remove('show');
-    setTimeout(() => el.remove(), 400);
-  }, 3500);
-}
-
-// ------------------------------------------------------------------ //
-// Utilities                                                            //
-// ------------------------------------------------------------------ //
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-// Initial load
-fetch('/api/queue').then(r => r.json()).then(renderQueue);
-</script>
-
+      <ol id="queue-list" aria-label="Song queue" hidden></ol>
+      <div class="empty-queue" id="empty-queue"><span class="empty-queue-icon" aria-hidden="true"><svg class="icon"><use href="#i-music"/></svg></span><p><strong>The queue is all yours.</strong><span>Add a link or local track above to get the first song ready.</span></p></div>
+    </section>
+    <footer class="workspace-footer"><span>Separate vocals. Sync lyrics. Take the stage.</span><span>H.264 video / AAC audio</span></footer>
+    <noscript><p class="inline-error">Enable JavaScript to add songs, control playback and create vocal mixes.</p></noscript>
+  </main>
+  <div class="notice" id="notice" role="status" hidden></div>
+  <div class="error-notice" id="error-notice" role="alert" hidden><span></span><button type="button" class="icon-button" id="dismiss-error" aria-label="Dismiss error"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
 </body>
 </html>

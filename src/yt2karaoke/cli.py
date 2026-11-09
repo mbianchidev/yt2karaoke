@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import sys
-import os
-from pathlib import Path
 from typing import Optional
 
 import click
@@ -23,14 +21,16 @@ def main() -> None:
 # ---------------------------------------------------------------------------
 
 @main.command()
-@click.argument("url")
+@click.argument("url", required=False)
+@click.option("--audio-file", type=click.Path(exists=True, dir_okay=False), help="Local audio or video file instead of a YouTube URL.")
+@click.option("--lyrics-file", type=click.Path(exists=True, dir_okay=False), help="Word-timed lyrics JSON instead of automatic transcription.")
 @click.option("-o", "--output-dir", default=".", show_default=True, help="Output directory.")
 @click.option("--filename", default=None, help="Output filename stem (no extension).")
 @click.option(
     "--vocals-volume",
     default=0.0,
     show_default=True,
-    type=float,
+    type=click.FloatRange(0, 1),
     help="Volume of original vocals in the mix (0=muted, 1=full).",
 )
 @click.option(
@@ -74,7 +74,9 @@ def main() -> None:
 @click.option("--distortion/--no-distortion", default=False, show_default=True, help="Apply distortion to vocals.")
 @click.option("--chorus/--no-chorus", default=False, show_default=True, help="Apply chorus to vocals.")
 def convert(
-    url: str,
+    url: Optional[str],
+    audio_file: Optional[str],
+    lyrics_file: Optional[str],
     output_dir: str,
     filename: Optional[str],
     vocals_volume: float,
@@ -92,7 +94,7 @@ def convert(
     distortion: bool,
     chorus: bool,
 ) -> None:
-    """Convert a YouTube URL to a karaoke video.
+    """Convert a YouTube URL or local media file to a karaoke video.
 
     \b
     URL   YouTube video URL (e.g. https://youtube.com/watch?v=xxx)
@@ -103,8 +105,12 @@ def convert(
     """
     from .pipeline import KaraokeConfig, run
 
+    if bool(url) == bool(audio_file):
+        raise click.UsageError("Provide exactly one YouTube URL or --audio-file.")
     config = KaraokeConfig(
-        youtube_url=url,
+        youtube_url=url or "",
+        audio_path=audio_file,
+        lyrics_path=lyrics_file,
         output_dir=output_dir,
         output_filename=filename,
         vocals_volume=vocals_volume,
@@ -124,7 +130,7 @@ def convert(
     )
 
     click.echo(f"🎤 yt2karaoke v{__version__}")
-    click.echo(f"   URL: {url}")
+    click.echo(f"   Source: {audio_file or url}")
     click.echo(f"   Output: {output_dir}")
 
     try:
@@ -134,6 +140,7 @@ def convert(
         click.echo(f"   Instrumental: {result.instrumental_path}")
         click.echo(f"   Lyrics (LRC): {result.lyrics_lrc_path}")
         click.echo(f"   Lyrics (ASS): {result.lyrics_ass_path}")
+        click.echo(f"   Lyrics (JSON): {result.lyrics_json_path}")
     except KeyboardInterrupt:
         click.echo("\nAborted.", err=True)
         sys.exit(1)
@@ -172,7 +179,7 @@ def convert(
     "--vocals-volume",
     default=0.0,
     show_default=True,
-    type=float,
+    type=click.FloatRange(0, 1),
     help="Volume of original vocals in the mix.",
 )
 @click.option(
@@ -217,4 +224,6 @@ def player(
     click.echo(f"   Open: http://{host}:{port}")
     click.echo(f"   Press Ctrl+C to stop.\n")
 
-    socketio.run(app, host=host, port=port, debug=debug)
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        click.echo("Warning: this is a development server. Do not expose it publicly.", err=True)
+    socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)

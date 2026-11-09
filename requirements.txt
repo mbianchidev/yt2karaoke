@@ -10,16 +10,13 @@ openai-whisper>=20231117
 # Audio effects
 pedalboard>=0.8.0
 
-# Video generation
-moviepy>=1.0.3
+# Video rendering uses system ffmpeg and ffprobe.
 
 # Image / visual generation
-Pillow>=10.0.0
+Pillow>=13.0.0
 numpy>=1.24.0
 
 # Audio utilities
-pydub>=0.25.1
-librosa>=0.10.0
 soundfile>=0.12.1
 
 # Web player
