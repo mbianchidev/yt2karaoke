@@ -7,7 +7,9 @@ suitable for karaoke sync.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+import json
+import math
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -36,6 +38,62 @@ class LyricWord:
 
 class TranscriptionError(Exception):
     """Raised when transcription fails."""
+
+
+def load_lyrics(path: str | os.PathLike, duration: Optional[float] = None) -> list[LyricLine]:
+    """Load and validate a JSON array of word-timed lyric lines."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise TranscriptionError(f"Could not read timed lyrics JSON: {exc}") from exc
+    if not isinstance(data, list) or not data:
+        raise TranscriptionError("Timed lyrics must be a non-empty JSON array of lyric lines.")
+
+    def timestamp(value, label: str) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TranscriptionError(f"{label} must be a time in seconds.")
+        if not math.isfinite(value) or value < 0:
+            raise TranscriptionError(f"{label} must be a finite, non-negative time.")
+        return float(value)
+
+    lines: list[LyricLine] = []
+    previous_end = 0.0
+    for index, entry in enumerate(data):
+        label = f"Lyric line {index + 1}"
+        if not isinstance(entry, dict) or not isinstance(entry.get("text"), str):
+            raise TranscriptionError(f"{label} needs a text field.")
+        text = entry["text"].strip()
+        start = timestamp(entry.get("start"), f"{label} start")
+        end = timestamp(entry.get("end"), f"{label} end")
+        if not text or end <= start or start < previous_end:
+            raise TranscriptionError(f"{label} must have text and ordered, non-overlapping times.")
+        if duration is not None and end > duration + 0.05:
+            raise TranscriptionError(f"{label} ends after the audio. Check its timestamps.")
+        entries = entry.get("words")
+        if not isinstance(entries, list) or not entries:
+            raise TranscriptionError(f"{label} needs word-level timestamps.")
+        words: list[LyricWord] = []
+        word_end = start
+        for word_entry in entries:
+            if not isinstance(word_entry, dict) or not isinstance(word_entry.get("word"), str):
+                raise TranscriptionError(f"{label} has an invalid word.")
+            word = word_entry["word"].strip()
+            word_start = timestamp(word_entry.get("start"), f"{label} word start")
+            end_time = timestamp(word_entry.get("end"), f"{label} word end")
+            if len(word.split()) != 1 or word_start < word_end or end_time <= word_start or end_time > end:
+                raise TranscriptionError(f"{label} word times must be ordered and within the line.")
+            words.append(LyricWord(word, word_start, end_time))
+            word_end = end_time
+        if " ".join(text.split()) != " ".join(word.word for word in words):
+            raise TranscriptionError(f"{label} text must match its timed words.")
+        lines.append(LyricLine(text, start, end, words))
+        previous_end = end
+    return lines
+
+
+def lines_to_json(lines: list[LyricLine]) -> str:
+    """Serialize editable lyric lines without losing word timestamps."""
+    return json.dumps([asdict(line) for line in lines], ensure_ascii=False, indent=2) + "\n"
 
 
 def transcribe(
@@ -73,6 +131,7 @@ def transcribe(
     options: dict = {
         "word_timestamps": True,
         "verbose": False,
+        "fp16": False,
     }
     if language:
         options["language"] = language
@@ -99,10 +158,13 @@ def _parse_whisper_result(result: dict) -> list[LyricLine]:
                     end=float(w.get("end", 0.0)),
                 )
             )
+        # Whisper's segment window can exclude its final word timestamp.
+        start = min(word.start for word in words) if words else float(segment.get("start", 0.0))
+        end = max(word.end for word in words) if words else float(segment.get("end", 0.0))
         line = LyricLine(
             text=segment.get("text", "").strip(),
-            start=float(segment.get("start", 0.0)),
-            end=float(segment.get("end", 0.0)),
+            start=start,
+            end=end,
             words=words,
         )
         lines.append(line)

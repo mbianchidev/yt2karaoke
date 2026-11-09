@@ -97,3 +97,20 @@ def test_download_audio_creates_output_dir(tmp_path):
         )
 
     assert new_dir.is_dir()
+
+
+@pytest.mark.parametrize("operation", ["metadata", "download"])
+def test_youtube_enables_available_javascript_runtimes(operation, tmp_path):
+    with patch("yt_dlp.YoutubeDL") as mock_ydl:
+        mock_ydl.return_value.__enter__.return_value.extract_info.return_value = _make_ydl_info()
+        if operation == "metadata":
+            get_video_info("https://youtube.com/watch?v=test123")
+        else:
+            download_audio(
+                "https://youtube.com/watch?v=test123",
+                output_dir=tmp_path, filename="test",
+            )
+    options = mock_ydl.call_args.args[0]
+    assert "deno" in options["js_runtimes"]
+    assert "node" in options["js_runtimes"]
+    assert options["noplaylist"] is True

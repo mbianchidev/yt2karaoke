@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -125,6 +126,28 @@ def test_move_down_last_item_is_noop():
     s2 = q.add("https://youtube.com/watch?v=b")
     result = q.move_down(s2.song_id)
     assert result is False  # already at bottom
+
+
+@pytest.mark.parametrize("status", [
+    SongStatus.DOWNLOADING, SongStatus.PROCESSING, SongStatus.READY, SongStatus.PLAYING,
+])
+def test_pending_songs_cannot_jump_a_processed_or_active_song(status):
+    queue = SongQueue()
+    first = queue.add("https://youtube.com/watch?v=first")
+    pending = queue.add("https://youtube.com/watch?v=pending")
+    first.status = status
+    assert queue.move_up(pending.song_id) is False
+    first.status, pending.status = SongStatus.QUEUED, status
+    assert queue.move_down(first.song_id) is False
+
+
+def test_queued_vocal_mix_keeps_the_existing_playback_order():
+    queue = SongQueue()
+    remix = queue.add("https://youtube.com/watch?v=remix")
+    pending = queue.add("https://youtube.com/watch?v=pending")
+    remix.video_path = Path("instrumental.mp4")
+    assert queue.move_down(remix.song_id) is False
+    assert queue.move_up(pending.song_id) is False
 
 
 # ---------------------------------------------------------------------------

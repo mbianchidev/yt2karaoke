@@ -9,10 +9,12 @@ particle drift.
 from __future__ import annotations
 
 import math
-from typing import Generator
+from functools import lru_cache
+from pathlib import Path
+from typing import Generator, Optional
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +123,7 @@ def render_lyric_frame(
     width: int = 1280,
     height: int = 720,
     font_size: int = 52,
+    highlight_index: Optional[int] = None,
 ) -> np.ndarray:
     """Overlay karaoke lyrics on a background frame.
 
@@ -150,51 +153,59 @@ def render_lyric_frame(
 
     draw = ImageDraw.Draw(bg)
 
-    try:
-        from PIL import ImageFont
-        _FONT_CANDIDATES_BOLD = [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-            "/System/Library/Fonts/Helvetica.ttc",
-            "C:/Windows/Fonts/arialbd.ttf",
-        ]
-        _FONT_CANDIDATES = [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-            "/System/Library/Fonts/Helvetica.ttc",
-            "C:/Windows/Fonts/arial.ttf",
-        ]
-        font = None
-        for candidate in _FONT_CANDIDATES_BOLD:
-            try:
-                font = ImageFont.truetype(candidate, font_size)
-                break
-            except (IOError, OSError):
-                continue
-        if font is None:
-            font = ImageFont.load_default()
-        small_font = None
-        for candidate in _FONT_CANDIDATES:
-            try:
-                small_font = ImageFont.truetype(candidate, int(font_size * 0.7))
-                break
-            except (IOError, OSError):
-                continue
-        if small_font is None:
-            small_font = font
-    except (IOError, OSError):
-        from PIL import ImageFont
-        font = ImageFont.load_default()
-        small_font = font
+    font = _load_font(font_size, True)
+    small_font = _load_font(max(1, int(font_size * 0.7)), False)
 
     # Draw current line with word highlighting
-    _draw_line_with_highlight(draw, current_line, highlight_word, font, width, height, y_frac=0.72)
+    _draw_line_with_highlight(
+        draw, current_line, highlight_word, font, width, height,
+        y_frac=0.68, highlight_index=highlight_index,
+    )
 
     # Draw next line dimmed
     if next_line:
         _draw_centered_text(draw, next_line, small_font, width, height, y_frac=0.85, color=(180, 180, 180))
 
     return np.array(bg.convert("RGB"), dtype=np.uint8)
+
+
+@lru_cache(maxsize=128)
+def _load_font(size: int, bold: bool):
+    bundled = Path(__file__).parent / "player" / "static" / "fonts" / "outfit.ttf"
+    candidates = [
+        str(bundled),
+        f"/usr/share/fonts/truetype/dejavu/DejaVuSans{'-Bold' if bold else ''}.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        f"C:/Windows/Fonts/{'arialbd' if bold else 'arial'}.ttf",
+    ]
+    for candidate in candidates:
+        try:
+            font = ImageFont.truetype(candidate, size)
+            if candidate == str(bundled):
+                font.set_variation_by_axes([650 if bold else 450])
+            return font
+        except (OSError, ValueError):
+            continue
+    return ImageFont.load_default(size=size)
+
+
+def _wrap_words(draw, words: list[str], font, max_width: float):
+    rows = []
+    row = []
+    row_width = 0.0
+    space_width = draw.textlength(" ", font=font)
+    for index, word in enumerate(words):
+        word_width = draw.textlength(word, font=font)
+        if row and row_width + space_width + word_width > max_width:
+            rows.append((row, row_width))
+            row, row_width = [], 0.0
+        if row:
+            row_width += space_width
+        row.append((index, word, word_width))
+        row_width += word_width
+    if row:
+        rows.append((row, row_width))
+    return rows, space_width
 
 
 def _draw_line_with_highlight(
@@ -205,28 +216,33 @@ def _draw_line_with_highlight(
     width: int,
     height: int,
     y_frac: float = 0.72,
+    highlight_index: Optional[int] = None,
 ) -> None:
     """Draw a lyric line; the highlighted word appears in yellow."""
     words = line.split()
     if not words:
         return
 
-    # Calculate total line width first
-    word_widths = []
-    for word in words:
-        bbox = draw.textbbox((0, 0), word + " ", font=font)
-        word_widths.append(bbox[2] - bbox[0])
-
-    total_width = sum(word_widths)
-    x = (width - total_width) // 2
-    y = int(height * y_frac)
-
-    for word, w in zip(words, word_widths):
-        clean = word.strip(".,!?\"'")
-        color = (255, 255, 0) if clean.lower() == highlight_word.strip(".,!?\"'").lower() else (255, 255, 255)
-        draw.text((x, y), word + " ", font=font, fill=color,
-                  stroke_width=2, stroke_fill=(0, 0, 0))
-        x += w
+    size = font.size
+    rows, space_width = _wrap_words(draw, words, font, width * 0.88)
+    while size > 1 and (len(rows) * size * 1.25 > height * 0.38 or any(w > width * 0.88 for _, w in rows)):
+        size -= 1
+        font = _load_font(size, True)
+        rows, space_width = _wrap_words(draw, words, font, width * 0.88)
+    line_height = size * 1.25
+    y = height * y_frac - (len(rows) - 1) * line_height / 2
+    for row, row_width in rows:
+        x = (width - row_width) / 2
+        for index, word, word_width in row:
+            highlighted = index == highlight_index if highlight_index is not None else (
+                bool(highlight_word)
+                and word.strip(".,!?\"'").lower() == highlight_word.strip(".,!?\"'").lower()
+            )
+            color = (255, 255, 0) if highlighted else (255, 255, 255)
+            draw.text((x, y), word, font=font, fill=color,
+                      stroke_width=max(1, size // 26), stroke_fill=(0, 0, 0))
+            x += word_width + space_width
+        y += line_height
 
 
 def _draw_centered_text(
@@ -239,6 +255,10 @@ def _draw_centered_text(
     color: tuple[int, int, int] = (255, 255, 255),
 ) -> None:
     """Draw text centred horizontally at a fractional vertical position."""
+    size = font.size
+    while size > 1 and draw.textlength(text, font=font) > width * 0.88:
+        size -= 1
+        font = _load_font(size, False)
     bbox = draw.textbbox((0, 0), text, font=font)
     tw = bbox[2] - bbox[0]
     x = (width - tw) // 2

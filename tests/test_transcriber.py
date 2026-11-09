@@ -67,6 +67,52 @@ def test_parse_multiple_segments():
     assert lines[1].start == 3.0
 
 
+def test_word_timestamps_define_line_bounds_instead_of_segment_window():
+    result = _make_whisper_result([{
+        "text": "Original test", "start": 1.2, "end": 2.0,
+        "words": [
+            {"word": "Original", "start": 1.0, "end": 1.5},
+            {"word": "test", "start": 1.6, "end": 2.4},
+        ],
+    }])
+    line = _parse_whisper_result(result)[0]
+    assert line.start == 1.0
+    assert line.end == 2.4
+    assert [(word.start, word.end) for word in line.words] == [(1.0, 1.5), (1.6, 2.4)]
+
+
+def test_segment_silence_does_not_extend_word_timed_line():
+    result = _make_whisper_result([{
+        "text": "Original", "start": 0.0, "end": 20.0,
+        "words": [{"word": "Original", "start": 10.0, "end": 11.0}],
+    }])
+    line = _parse_whisper_result(result)[0]
+    assert (line.start, line.end) == (10.0, 11.0)
+
+
+def test_renderer_keeps_the_word_after_the_raw_segment_end(monkeypatch):
+    import numpy as np
+    from yt2karaoke.video import _FrameGenerator
+
+    result = _make_whisper_result([{
+        "text": "Original test", "start": 1.0, "end": 2.0,
+        "words": [
+            {"word": "Original", "start": 1.0, "end": 1.5},
+            {"word": "test", "start": 1.6, "end": 2.4},
+        ],
+    }])
+    observed = []
+
+    def render(*args, **kwargs):
+        observed.append((args[1], args[3], kwargs["highlight_index"]))
+        return np.zeros((36, 64, 3), dtype=np.uint8)
+
+    monkeypatch.setattr("yt2karaoke.video.render_lyric_frame", render)
+    frames = _FrameGenerator(_parse_whisper_result(result), 3.0, 24, 64, 36, "plasma", 0.5, 24)
+    frames.make_frame(2.2)
+    assert observed == [("Original test", "test", 1)]
+
+
 # ---------------------------------------------------------------------------
 # _ass_timestamp
 # ---------------------------------------------------------------------------

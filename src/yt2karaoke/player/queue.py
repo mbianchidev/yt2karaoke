@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import logging
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -30,8 +31,23 @@ class QueuedSong:
     status: SongStatus = SongStatus.QUEUED
     error: Optional[str] = None
     song_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    audio_path: Optional[Path] = None
+    lyrics_path: Optional[Path] = None
+    lyrics_json_path: Optional[Path] = None
+    lyrics_lrc_path: Optional[Path] = None
+    lyrics_ass_path: Optional[Path] = None
+    instrumental_path: Optional[Path] = None
+    vocals_path: Optional[Path] = None
+    vocals_volume: float = 0.0
+    rendered_vocals_volume: float = 0.0
+    visual_style: str = "plasma"
+    stage: str = "Queued"
+    progress: int = 0
+    duration: float = 0.0
+    mixes: dict[float, Path] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
+        available = self.video_path is not None and self.rendered_vocals_volume in self.mixes
         return {
             "id": self.song_id,
             "url": self.youtube_url,
@@ -39,6 +55,23 @@ class QueuedSong:
             "status": self.status.name,
             "video_path": str(self.video_path) if self.video_path else None,
             "error": self.error,
+            "source": "upload" if self.audio_path else "youtube",
+            "vocals_volume": self.vocals_volume,
+            "rendered_vocals_volume": self.rendered_vocals_volume,
+            "visual_style": self.visual_style,
+            "stage": self.stage,
+            "progress": self.progress,
+            "duration": self.duration,
+            "video_url": (
+                f"/video/{self.song_id}?vocals={self.rendered_vocals_volume:g}"
+                if available else None
+            ),
+            "instrumental_url": f"/video/{self.song_id}?vocals=0&download=1" if available else None,
+            "mix_url": (
+                f"/video/{self.song_id}?vocals={self.rendered_vocals_volume:g}&download=1"
+                if available and self.rendered_vocals_volume > 0 else None
+            ),
+            "lyrics_url": f"/lyrics/{self.song_id}?format=json" if self.lyrics_json_path else None,
         }
 
 
@@ -74,7 +107,16 @@ class SongQueue:
     # Queue operations
     # ------------------------------------------------------------------
 
-    def add(self, youtube_url: str, title: str = "") -> QueuedSong:
+    def add(
+        self,
+        youtube_url: str,
+        title: str = "",
+        *,
+        audio_path: Optional[Path] = None,
+        lyrics_path: Optional[Path] = None,
+        vocals_volume: float = 0.0,
+        visual_style: str = "plasma",
+    ) -> QueuedSong:
         """Add a song to the end of the queue.
 
         Args:
@@ -84,14 +126,22 @@ class SongQueue:
         Returns:
             The newly created :class:`QueuedSong` entry.
         """
-        song = QueuedSong(youtube_url=youtube_url, title=title)
+        from ..video import validate_vocals_volume
+
+        volume = validate_vocals_volume(vocals_volume)
+        if visual_style not in ("plasma", "gradient"):
+            raise ValueError("visual_style must be plasma or gradient.")
+        song = QueuedSong(
+            youtube_url=youtube_url, title=title, audio_path=audio_path,
+            lyrics_path=lyrics_path, vocals_volume=volume, visual_style=visual_style,
+        )
         with self._lock:
             self._songs.append(song)
         self._event.set()
         return song
 
     def remove(self, song_id: str) -> bool:
-        """Remove a *QUEUED* song from the queue.
+        """Remove a song that is not currently being processed.
 
         Songs currently being processed cannot be removed.
 
@@ -104,16 +154,71 @@ class SongQueue:
         """
         with self._lock:
             for i, song in enumerate(self._songs):
-                if song.song_id == song_id and song.status == SongStatus.QUEUED:
+                if song.song_id == song_id and song.status in (
+                    SongStatus.QUEUED, SongStatus.READY, SongStatus.DONE, SongStatus.ERROR,
+                ):
                     self._songs.pop(i)
                     return True
         return False
+
+    def request_mix(self, song_id: str, vocals_volume: float) -> bool:
+        """Select a cached mix or queue a separate export using saved stems."""
+        from ..video import validate_vocals_volume
+
+        volume = validate_vocals_volume(vocals_volume)
+        with self._lock:
+            song = next((song for song in self._songs if song.song_id == song_id), None)
+            if song is None or song.video_path is None or song.status != SongStatus.READY:
+                return False
+            song.vocals_volume = volume
+            song.error = None
+            if volume in song.mixes:
+                song.rendered_vocals_volume = volume
+                song.stage = "Ready"
+                song.progress = 100
+            else:
+                song.status = SongStatus.QUEUED
+                song.stage = "Vocal mix queued"
+                song.progress = 0
+                self._event.set()
+        return True
+
+    def retry(self, song_id: str) -> bool:
+        """Retry a failed conversion without losing its source or options."""
+        with self._lock:
+            song = next((song for song in self._songs if song.song_id == song_id), None)
+            if song is None or song.status != SongStatus.ERROR:
+                return False
+            song.status = SongStatus.QUEUED
+            song.stage = "Queued"
+            song.progress = 0
+            song.error = None
+            self._event.set()
+        return True
+
+    def update_progress(self, song_id: str, stage: str, progress: int) -> None:
+        """Update processing state atomically for queue snapshots."""
+        with self._lock:
+            for song in self._songs:
+                if song.song_id == song_id:
+                    song.stage = stage
+                    song.progress = progress
+                    song.status = (
+                        SongStatus.DOWNLOADING if stage == "Downloading audio"
+                        else SongStatus.PROCESSING
+                    )
+                    break
 
     def move_up(self, song_id: str) -> bool:
         """Move a queued song one position toward the front of the queue."""
         with self._lock:
             for i, song in enumerate(self._songs):
-                if song.song_id == song_id and song.status == SongStatus.QUEUED and i > 0:
+                if (
+                    song.song_id == song_id and song.status == SongStatus.QUEUED
+                    and song.video_path is None and i > 0
+                    and self._songs[i - 1].status == SongStatus.QUEUED
+                    and self._songs[i - 1].video_path is None
+                ):
                     self._songs[i], self._songs[i - 1] = (
                         self._songs[i - 1],
                         self._songs[i],
@@ -125,7 +230,12 @@ class SongQueue:
         """Move a queued song one position toward the back of the queue."""
         with self._lock:
             for i, song in enumerate(self._songs):
-                if song.song_id == song_id and song.status == SongStatus.QUEUED and i < len(self._songs) - 1:
+                if (
+                    song.song_id == song_id and song.status == SongStatus.QUEUED
+                    and song.video_path is None and i < len(self._songs) - 1
+                    and self._songs[i + 1].status == SongStatus.QUEUED
+                    and self._songs[i + 1].video_path is None
+                ):
                     self._songs[i], self._songs[i + 1] = (
                         self._songs[i + 1],
                         self._songs[i],
@@ -191,10 +301,10 @@ class SongQueue:
             self._event.wait()
             self._event.clear()
             while self._running:
-                song = self.next_pending()
-                if song is None:
-                    break
                 with self._lock:
+                    song = next((song for song in self._songs if song.status == SongStatus.QUEUED), None)
+                    if song is None:
+                        break
                     song.status = SongStatus.PROCESSING
                 try:
                     self._worker(song)
@@ -202,6 +312,7 @@ class SongQueue:
                         if song.status == SongStatus.PROCESSING:
                             song.status = SongStatus.READY
                 except Exception as exc:
+                    logging.getLogger(__name__).exception("Processing song %s failed", song.song_id)
                     with self._lock:
                         song.status = SongStatus.ERROR
                         song.error = str(exc)
