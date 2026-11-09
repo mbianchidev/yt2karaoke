@@ -4,6 +4,8 @@
 
 Install ffmpeg (including ffprobe) with your operating system's package manager, create a Python environment, and install the project. Python 3.14 is the newest supported version; Demucs' native `sphn` dependency does not yet support 3.15.
 
+For YouTube sources, install Node.js 22+ or Deno 2.3+ in `PATH` as well. The downloader enables either runtime automatically, and the project's `yt-dlp[default]` dependency includes its matching `yt-dlp-ejs` challenge solver. No browser cookies or remote solver downloads are configured. See the [yt-dlp EJS setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS) for runtime installation details.
+
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate

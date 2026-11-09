@@ -6,6 +6,8 @@ The application retains its Python/Flask architecture. Templates, CSS, JavaScrip
 
 Use Python 3.14 and install ffmpeg (including ffprobe) in `PATH`. Python 3.11-3.14 are supported; 3.15 is blocked by Demucs' native `sphn` dependency.
 
+YouTube integration checks also require Node.js 22+ or Deno 2.3+ in `PATH`. Installing the project's dependencies includes the compatible EJS solver, so yt-dlp can use the installed runtime without downloading solver scripts at runtime.
+
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate

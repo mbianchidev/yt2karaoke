@@ -8,6 +8,8 @@ Demucs separates the track, Whisper finds the words, and animated visuals put th
 
 Requires **Python 3.11-3.14** (3.14 recommended) and **ffmpeg/ffprobe** in `PATH`. Python 3.15 is not yet supported by Demucs' `sphn` dependency.
 
+YouTube inputs also need **Node.js 22+** or **Deno 2.3+** in `PATH`. The Python install includes yt-dlp's JavaScript challenge solver.
+
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate

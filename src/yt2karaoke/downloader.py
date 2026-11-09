@@ -13,6 +13,15 @@ class DownloadError(Exception):
     """Raised when a YouTube download fails."""
 
 
+def _ydl_options() -> dict[str, object]:
+    return {
+        "quiet": True,
+        "noprogress": True,
+        "noplaylist": True,
+        "js_runtimes": {"deno": {}, "node": {}},
+    }
+
+
 def download_audio(
     url: str,
     output_dir: str | os.PathLike = ".",
@@ -38,11 +47,10 @@ def download_audio(
 
     outtmpl = str(output_dir / (filename if filename else "%(title)s")) + ".%(ext)s"
 
-    ydl_opts: dict = {
+    ydl_opts = _ydl_options()
+    ydl_opts.update({
         "format": "bestaudio/best",
         "outtmpl": outtmpl,
-        "noplaylist": True,
-        "quiet": True,
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -50,7 +58,7 @@ def download_audio(
                 "preferredquality": "0",  # lossless for WAV/FLAC
             }
         ],
-    }
+    })
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -76,7 +84,8 @@ def get_video_info(url: str) -> dict:
     Raises:
         DownloadError: If metadata extraction fails.
     """
-    ydl_opts = {"quiet": True, "skip_download": True}
+    ydl_opts = _ydl_options()
+    ydl_opts["skip_download"] = True
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)

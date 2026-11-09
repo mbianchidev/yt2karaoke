@@ -17,7 +17,7 @@ setup(
     packages=find_namespace_packages(where="src", include=["yt2karaoke", "yt2karaoke.*"]),
     include_package_data=True,
     install_requires=[
-        "yt-dlp>=2024.1.0",
+        "yt-dlp[default]>=2026.10.26",
         "demucs>=4.0.0",
         "openai-whisper>=20231117",
         "pedalboard>=0.8.0",

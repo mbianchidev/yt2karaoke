@@ -1,5 +1,5 @@
 # YouTube download
-yt-dlp>=2024.1.0
+yt-dlp[default]>=2026.10.26
 
 # Audio separation (demucs - same core used by track2stem)
 demucs>=4.0.0
