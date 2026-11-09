@@ -2,9 +2,31 @@
 
 ## Setup
 
-Install ffmpeg (including ffprobe) with your operating system's package manager, create a Python environment, and install the project. Python 3.14 is the newest supported version; Demucs' native `sphn` dependency does not yet support 3.15.
+Python 3.11-3.14 are supported; 3.14 is recommended. Demucs' native `sphn` dependency does not yet support 3.15. Install ffmpeg (including ffprobe) in `PATH`.
 
 For YouTube sources, install Node.js 22+ or Deno 2.3+ in `PATH` as well. The downloader enables either runtime automatically, and the project's `yt-dlp[default]` dependency includes its matching `yt-dlp-ejs` challenge solver. No browser cookies or remote solver downloads are configured. See the [yt-dlp EJS setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS) for runtime installation details.
+
+### From GitHub Releases (macOS)
+
+Download the `.whl` file from a published [GitHub Release](https://github.com/mbianchidev/yt2karaoke/releases). Run the following in the download directory, replacing `0.1.0` with the downloaded version:
+
+```bash
+brew install uv ffmpeg node
+uvx --python 3.14 --from ./yt2karaoke-0.1.0-py3-none-any.whl \
+  yt2karaoke player --port 5000
+```
+
+`uvx` downloads Python if needed and installs the wheel's Python dependencies in a managed environment. No source checkout or manually activated virtual environment is needed. The wheel does not bundle ffmpeg, Node.js or AI model weights.
+
+Each release also includes a source archive and `SHA256SUMS`. To check downloaded packages, download both archives and the checksum file into the same directory, then run `shasum -a 256 -c SHA256SUMS`.
+
+To upgrade, stop the running server with Ctrl+C, download the new wheel and rerun the command with its filename. Existing karaoke output files are retained.
+
+This is still a terminal-launched local web app, not a standalone desktop installer. Packages are published to GitHub Releases, not PyPI; do not omit `--from` or substitute an unverified package-index download.
+
+### From a source checkout
+
+Create a Python environment and install the project from the repository root:
 
 ```bash
 python3.14 -m venv .venv
@@ -14,6 +36,8 @@ yt2karaoke player --port 5000 --output-dir ./karaoke_output
 ```
 
 Open [localhost:5000](http://localhost:5000). Models download on first use, so the initial conversion needs internet access and may take longer. Later local-file conversions can use cached models. The browser loads its fonts and Socket.IO client from the studio itself.
+
+For either setup, run the launcher from the directory where you want `karaoke_output` created, or set `--output-dir` to an explicit path.
 
 The player is a local development server. Keep the default loopback host; do not expose it publicly. The queue is held in memory for the running session. Exported videos, stems and lyrics remain in the output directory after shutdown.
 

@@ -107,3 +107,24 @@ This is a live external-service test: network errors, unavailable media, YouTube
 Socket.IO client 4.8.4 is vendored from its published npm package. Outfit and Instrument Sans are from the Google Fonts repository. Their MIT and SIL OFL notices are included under `player/static/vendor/` and `player/static/fonts/` and must remain with redistributed assets.
 
 The renderer uses FFmpeg directly so Pillow can receive current security updates. Do not restore MoviePy's `Pillow<12` constraint. Pillow 13+ and pytest 9.0.3+ are required.
+
+## Publishing releases
+
+`.github/workflows/publish.yml` publishes the wheel, source archive and `SHA256SUMS` to GitHub Releases when a `v*` tag is pushed. It does not publish to PyPI or produce a standalone desktop installer.
+
+Before tagging, update **both** `version` in `setup.py` and `__version__` in `src/yt2karaoke/__init__.py` through a reviewed PR. Wait for that revision's CI to pass, then tag its merged commit. For example, when both package versions are `0.1.0`:
+
+```bash
+git tag -a v0.1.0 <merged-commit-sha> -m "Release v0.1.0"
+git push origin v0.1.0
+```
+
+The tag must exactly equal `v` plus the built package's normalized Python version. For example, `0.2.0rc1` uses `v0.2.0rc1`; prerelease versions are marked as GitHub prereleases and are not marked latest. A mismatched tag or disagreement between the package and CLI versions fails before publication.
+
+The build job uses Python 3.14 and `uv build`, installs the built wheel with CPU-only Torch dependencies, checks the installed CLI and packaged studio routes/assets, and runs the same strict dependency audit as full-song CI. Only the publishing job has `contents: write`; it downloads the verified artifacts without checking out or executing project code. Tag-specific concurrency does not cancel an in-progress publication.
+
+Release notes include generated changes, the source commit, macOS prerequisites, first-use and upgrade commands, and the terminal-launcher limitation. The publishing job downloads the final release assets and verifies their checksums before succeeding.
+
+For a build/install/audit dry run, manually dispatch **Publish Python packages** on the desired ref. Manual runs never publish, even when a tag is selected. Actions exposes newly added workflows for manual dispatch only after they exist on the default branch. Intermediate build artifacts expire after 3 days; published release assets do not use that retention limit.
+
+Rerun a failed tag workflow after fixing transient infrastructure or network problems. Publishing never overwrites an existing release; if publication already created a release or draft, inspect its assets and the failed step before recovery. Changed package contents require a new version and tag, not a replacement of an existing published version. See the [release installation guide](usage.md#from-github-releases-macos) for the user-facing steps.
