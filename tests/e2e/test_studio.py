@@ -61,7 +61,9 @@ def studio(tmp_path):
 @pytest.fixture(params=["light", "dark"])
 def browser_page(studio, request):
     with playwright.sync_playwright() as integration:
-        browser = integration.chromium.launch(headless=True)
+        browser = integration.chromium.launch(headless=True, args=[
+            "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
+        ])
         context = browser.new_context(
             viewport={"width": 1440, "height": 1000},
             accept_downloads=True, color_scheme=request.param,
@@ -76,12 +78,55 @@ def browser_page(studio, request):
         browser.close()
 
 
-def add_song(page, title="Original test"):
+def add_song(page, title="Original test", performer=""):
     page.get_by_label("YouTube URL").fill("https://youtube.com/watch?v=synthetic")
+    if performer:
+        page.get_by_label("Singer / group name", exact=True).fill(performer)
     page.get_by_text("Optional settings", exact=True).click()
     page.get_by_label("Song title").fill(title)
     page.get_by_role("button", name="Add to queue", exact=True).click()
     page.get_by_role("button", name=f"Play {title}", exact=True).wait_for(timeout=30000)
+
+
+def install_audio_probe(page):
+    page.evaluate("""() => {
+        const connect = AudioNode.prototype.connect;
+        AudioNode.prototype.connect = function(destination, ...args) {
+            if (destination instanceof AudioDestinationNode) {
+                const analyser = this.context.createAnalyser();
+                analyser.fftSize = 8192;
+                analyser.smoothingTimeConstant = 0;
+                connect.call(this, analyser);
+                window.testMixAnalyser = analyser;
+            }
+            return connect.call(this, destination, ...args);
+        };
+        window.testAudioLevels = () => {
+            const analyser = window.testMixAnalyser;
+            if (!analyser) return {backing: 0, voice: 0, rms: 0};
+            const spectrum = new Float32Array(analyser.frequencyBinCount);
+            analyser.getFloatFrequencyData(spectrum);
+            const amplitude = frequency => {
+                const bin = Math.round(frequency * analyser.fftSize / analyser.context.sampleRate);
+                return 10 ** (Math.max(...spectrum.slice(bin - 3, bin + 4)) / 20);
+            };
+            const samples = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(samples);
+            return {
+                backing: amplitude(220), voice: amplitude(880),
+                rms: Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length),
+            };
+        };
+    }""")
+
+
+def finish_song(page):
+    page.wait_for_function("Number.isFinite(document.querySelector('#main-video').duration)")
+    page.evaluate("""() => {
+        const video = document.querySelector("#main-video");
+        video.loop = false;
+        video.currentTime = video.duration - 0.05;
+    }""")
 
 
 def expect_theme(page, theme):
@@ -312,6 +357,7 @@ def test_download_instrumental_and_separate_vocal_mix(browser_page, studio):
     pending.value.save_as(studio[2] / "vocal-mix.mp4")
     assert pending.value.suggested_filename.endswith("_vocals_25pct.mp4")
     assert instrumental_link.get_attribute("href").endswith("vocals=0&download=1")
+    assert page.locator("#main-video").get_attribute("src").endswith("vocals=0")
     page.get_by_text("View synced lyrics", exact=True).click()
     assert page.get_by_role("button", name="Seek to Original test").is_visible()
     page.get_by_role("button", name="Play song", exact=True).click()
@@ -327,6 +373,297 @@ def test_local_upload_journey(browser_page, studio):
     page.get_by_role("button", name="Add to queue", exact=True).click()
     page.get_by_role("button", name="Play source", exact=True).wait_for(timeout=30000)
     assert page.get_by_role("link", name="Download instrumental MP4", exact=True).is_visible()
+    assert not errors
+
+
+def test_original_vocal_slider_changes_live_playback_without_an_export(browser_page):
+    page, errors = browser_page
+    add_song(page)
+    page.get_by_role("button", name="Play song", exact=True).click()
+    page.get_by_role("button", name="Light guide, 25% vocals").click()
+    page.wait_for_function("""() => {
+        const vocals = document.querySelector("#original-vocals");
+        return vocals && !vocals.paused && vocals.currentTime > 0;
+    }""")
+    assert page.locator("#main-video").get_attribute("src").endswith("vocals=0")
+    assert page.locator("#original-vocals").get_attribute("src").endswith("/vocals")
+    assert not page.get_by_role("link", name="Download 25% vocal mix", exact=True).is_visible()
+    playwright.expect(page.locator("#preview-tag")).to_contain_text("25%")
+    assert not errors
+
+
+def test_live_vocal_gain_and_master_volume_are_measured_in_the_audio_output(browser_page):
+    page, errors = browser_page
+    install_audio_probe(page)
+    add_song(page)
+    page.evaluate("document.querySelector('#main-video').loop = true")
+    page.get_by_role("button", name="Light guide, 25% vocals").click()
+    page.get_by_role("button", name="Play song", exact=True).click()
+    page.wait_for_function("window.testAudioLevels().voice > 0.005")
+    page.wait_for_timeout(250)  # Let the FFT window and gain ramp contain only the selected mix.
+    quiet = page.evaluate("window.testAudioLevels()")
+    slider = page.get_by_role("slider", name="Original vocals", exact=True)
+    slider.focus()
+    slider.press("End")
+    page.wait_for_function("quiet => window.testAudioLevels().voice > quiet.voice * 3.9", arg=quiet)
+    loud = page.evaluate("window.testAudioLevels()")
+    assert loud["voice"] / quiet["voice"] == pytest.approx(4, abs=0.35)
+    assert loud["backing"] / quiet["backing"] == pytest.approx(1, abs=0.1)
+    page.get_by_role("button", name="Instrumental, 0% vocals").click()
+    page.wait_for_function("loud => window.testAudioLevels().voice < loud.voice * 0.02", arg=loud)
+    assert page.evaluate("window.testAudioLevels().backing") == pytest.approx(loud["backing"], rel=0.1)
+    speakers = page.get_by_role("slider", name="Speaker volume", exact=True)
+    speakers.focus()
+    speakers.press("Home")
+    playwright.expect(page.get_by_role("slider", name="Playback volume", exact=True)).to_have_value("0")
+    page.wait_for_function("window.testAudioLevels().rms < 0.0001")
+    speakers.press("End")
+    page.wait_for_function("window.testAudioLevels().rms > 0.05")
+    page.get_by_role("button", name="Mute speakers", exact=True).click()
+    page.wait_for_function("window.testAudioLevels().rms < 0.0001")
+    page.get_by_role("button", name="Unmute speakers", exact=True).click()
+    page.wait_for_function("window.testAudioLevels().rms > 0.05")
+    backing = page.get_by_role("slider", name="Backing track volume", exact=True)
+    backing.focus()
+    backing.press("Home")
+    page.wait_for_function("window.testAudioLevels().rms < 0.0001")
+    assert not errors
+
+
+def test_microphone_is_opt_in_muted_and_releases_fake_capture(browser_page):
+    page, errors = browser_page
+    page.evaluate("""() => {
+        window.testMicTracks = [];
+        window.testFilters = [];
+        window.testCompressors = [];
+        const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = async options => {
+            const stream = await capture(options);
+            window.testMicTracks.push(...stream.getTracks());
+            return stream;
+        };
+        const filter = AudioContext.prototype.createBiquadFilter;
+        AudioContext.prototype.createBiquadFilter = function() {
+            const node = filter.call(this);
+            window.testFilters.push(node);
+            return node;
+        };
+        const compressor = AudioContext.prototype.createDynamicsCompressor;
+        AudioContext.prototype.createDynamicsCompressor = function() {
+            const node = compressor.call(this);
+            window.testCompressors.push(node);
+            return node;
+        };
+        const PitchNode = window.AudioWorkletNode;
+        window.AudioWorkletNode = class extends PitchNode {
+            constructor(...args) { super(...args); window.testPitch = this; }
+        };
+    }""")
+    assert page.evaluate("window.testMicTracks.length") == 0
+    page.get_by_role("button", name="Enable microphone", exact=True).click()
+    playwright.expect(page.locator("#mic-status")).to_have_text("Microphone on / muted")
+    monitor = page.get_by_role("checkbox", name="Hear my microphone", exact=True)
+    assert not monitor.is_checked()
+    page.wait_for_function("document.querySelector('#mic-meter').value > 0")
+    page.get_by_role("button", name="High pitch", exact=True).click()
+    page.wait_for_function("Math.abs(window.testPitch.parameters.get('semitones').value - 7) < 0.1")
+    page.get_by_role("button", name="Low pitch", exact=True).click()
+    page.wait_for_function("Math.abs(window.testPitch.parameters.get('semitones').value + 7) < 0.1")
+    bass = page.get_by_role("slider", name="Bass", exact=True)
+    bass.focus()
+    bass.press("End")
+    page.wait_for_function("Math.abs(window.testFilters.find(node => node.type === 'lowshelf').gain.value - 12) < 0.1")
+    compression = page.get_by_role("slider", name="Compression", exact=True)
+    compression.focus()
+    compression.press("End")
+    page.wait_for_function("Math.abs(window.testCompressors.at(-1).threshold.value + 36) < 0.1")
+    monitor.check()
+    playwright.expect(page.locator("#mic-status")).to_have_text("Microphone on / monitoring")
+    page.get_by_role("button", name="Disable microphone", exact=True).click()
+    playwright.expect(page.locator("#mic-status")).to_have_text("Microphone off")
+    assert page.evaluate("window.testMicTracks.every(track => track.readyState === 'ended')")
+    assert monitor.is_disabled()
+    page.get_by_role("button", name="Enable microphone", exact=True).click()
+    playwright.expect(page.locator("#mic-status")).to_have_text("Microphone on / muted")
+    assert not monitor.is_checked()
+    page.evaluate("window.dispatchEvent(new PageTransitionEvent('pagehide'))")
+    assert page.evaluate("window.testMicTracks.every(track => track.readyState === 'ended')")
+    assert not errors
+
+
+def test_denied_microphone_permission_is_reported_without_breaking_playback(browser_page):
+    page, errors = browser_page
+    page.evaluate("""() => {
+        navigator.mediaDevices.getUserMedia = async () => {
+            throw new DOMException("Test permission denied", "NotAllowedError");
+        };
+    }""")
+    page.get_by_role("button", name="Enable microphone", exact=True).click()
+    playwright.expect(page.get_by_role("alert").filter(has_text="Allow microphone access")).to_be_visible()
+    assert page.get_by_role("button", name="Enable microphone", exact=True).is_enabled()
+    add_song(page)
+    page.get_by_role("button", name="Play song", exact=True).click()
+    page.wait_for_function("document.querySelector('#main-video').currentTime > 0.2")
+    assert not errors
+
+
+def test_speaker_selection_failure_keeps_the_previous_output(browser_page):
+    page, errors = browser_page
+    page.evaluate("""() => {
+        navigator.mediaDevices.enumerateDevices = async () => [
+            {kind: "audiooutput", deviceId: "test-speakers", label: "Test speakers"},
+        ];
+        AudioContext.prototype.setSinkId = async () => {
+            throw new DOMException("Test speakers unavailable", "NotFoundError");
+        };
+    }""")
+    page.get_by_role("button", name="Refresh devices", exact=True).click()
+    speakers = page.get_by_role("combobox", name="Speakers", exact=True)
+    speakers.select_option("test-speakers")
+    playwright.expect(page.get_by_role("alert").filter(has_text="Speakers could not change")).to_be_visible()
+    playwright.expect(speakers).to_have_value("")
+    assert not errors
+
+
+def test_speaker_selection_waits_for_the_device_change(browser_page):
+    page, errors = browser_page
+    page.evaluate("""() => {
+        navigator.mediaDevices.enumerateDevices = async () => [
+            {kind: "audiooutput", deviceId: "test-speakers", label: "Test speakers"},
+        ];
+        AudioContext.prototype.setSinkId = () => new Promise(resolve => {
+            window.resolveTestSink = resolve;
+        });
+    }""")
+    page.get_by_role("button", name="Refresh devices", exact=True).click()
+    speakers = page.get_by_role("combobox", name="Speakers", exact=True)
+    speakers.select_option("test-speakers")
+    page.wait_for_function("typeof window.resolveTestSink === 'function'")
+    assert speakers.is_disabled()
+    page.evaluate("window.resolveTestSink()")
+    playwright.expect(speakers).to_be_enabled()
+    playwright.expect(speakers).to_have_value("test-speakers")
+    assert not errors
+
+
+def test_stage_window_mirrors_video_and_seeks_without_duplicate_audio(browser_page):
+    page, errors = browser_page
+    add_song(page)
+    with page.expect_popup() as pending:
+        page.get_by_role("button", name="Open stage window", exact=True).click()
+    stage_page = pending.value
+    stage_page.on("pageerror", lambda error: errors.append(str(error)))
+    stage_page.wait_for_load_state("networkidle")
+    page.evaluate("document.querySelector('#main-video').loop = true")
+    page.get_by_role("button", name="Play song", exact=True).click()
+    stage_page.wait_for_function("!document.querySelector('#stage-video').paused")
+    assert stage_page.locator("#stage-video").evaluate("video => video.muted")
+    assert stage_page.locator("#stage-video").get_attribute("src") == page.locator("#main-video").get_attribute("src")
+    stage_page.reload(wait_until="networkidle")
+    stage_page.wait_for_function("!document.querySelector('#stage-video').paused")
+    assert page.get_by_role("button", name="Close stage window", exact=True).is_visible()
+    page.get_by_role("button", name="Pause song", exact=True).click()
+    stage_page.wait_for_function("document.querySelector('#stage-video').paused")
+    page.locator("#main-video").evaluate("video => { video.currentTime = 1; }")
+    stage_page.wait_for_function("Math.abs(document.querySelector('#stage-video').currentTime - 1) <= 0.12")
+    stage_page.get_by_role("button", name="Close stage", exact=True).click()
+    playwright.expect(page.get_by_role("button", name="Open stage window", exact=True)).to_be_visible()
+    assert not errors
+
+
+def test_singer_countdown_keeps_the_playing_song_and_names_the_next_singer(browser_page):
+    page, errors = browser_page
+    add_song(page, "First fixture", "Test solo")
+    page.evaluate("document.querySelector('#main-video').loop = true")
+    page.get_by_role("button", name="Play song", exact=True).click()
+    first_source = page.locator("#main-video").get_attribute("src")
+    add_song(page, "Second fixture", "Test duo")
+    assert page.locator("#main-video").get_attribute("src") == first_source
+    assert page.get_by_role("button", name="Pause song", exact=True).is_visible()
+    playwright.expect(page.get_by_role("spinbutton", name="Seconds between songs")).to_have_value("30")
+    with page.expect_popup() as pending:
+        page.get_by_role("button", name="Open stage window", exact=True).click()
+    stage_page = pending.value
+    stage_page.on("pageerror", lambda error: errors.append(str(error)))
+    stage_page.wait_for_load_state("networkidle")
+    page.get_by_role("spinbutton", name="Seconds between songs").fill("2")
+    page.get_by_role("spinbutton", name="Seconds between songs").press("Tab")
+    page.evaluate("""() => {
+        const video = document.querySelector("#main-video");
+        video.loop = false;
+        video.currentTime = video.duration - 0.1;
+    }""")
+    playwright.expect(page.locator("#countdown-overlay")).to_be_visible()
+    playwright.expect(page.locator("#next-singer")).to_have_text("Test duo")
+    playwright.expect(page.locator("#next-song")).to_have_text("Second fixture")
+    playwright.expect(stage_page.locator("#stage-next-singer")).to_have_text("Test duo")
+    playwright.expect(stage_page.locator("#stage-countdown")).to_be_visible()
+    assert page.locator("#main-video").get_attribute("src") == first_source
+    page.wait_for_function(
+        "first => document.querySelector('#main-video').getAttribute('src') !== first", arg=first_source,
+    )
+    playwright.expect(page.locator("#now-playing-title")).to_have_text("Second fixture")
+    assert not errors
+
+
+def test_other_singers_can_add_songs_without_taking_over_playback(browser_page, studio):
+    page, errors = browser_page
+    add_song(page, "Playing fixture", "Test solo")
+    page.evaluate("document.querySelector('#main-video').loop = true")
+    page.get_by_role("button", name="Play song", exact=True).click()
+    first_source = page.locator("#main-video").get_attribute("src")
+    guest = page.context.new_page()
+    guest.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        guest.goto(studio[0], wait_until="networkidle")
+        add_song(guest, "Queued fixture", "Test trio")
+        playwright.expect(page.get_by_role("list", name="Song queue", exact=True).get_by_role("listitem")).to_have_count(2)
+        playwright.expect(page.locator("#queue-list")).to_contain_text("Test trio")
+        assert page.locator("#main-video").get_attribute("src") == first_source
+        assert not page.locator("#main-video").evaluate("video => video.paused")
+        assert guest.locator("#main-video").evaluate("video => video.paused")
+        playwright.expect(page.locator(".queue-status").filter(has_text="Playing")).to_have_count(1)
+        playwright.expect(guest.locator(".queue-status").filter(has_text="Playing")).to_have_count(0)
+    finally:
+        guest.close()
+    assert not errors
+
+
+def test_countdown_can_be_held_and_a_removed_next_song_is_not_played(browser_page):
+    page, errors = browser_page
+    add_song(page, "First fixture", "Test solo")
+    add_song(page, "Second fixture", "Test duo")
+    page.get_by_role("button", name="Play song", exact=True).click()
+    finish_song(page)
+    playwright.expect(page.locator("#countdown-overlay")).to_be_visible()
+    page.get_by_role("button", name="Remove Second fixture", exact=True).click()
+    playwright.expect(page.locator("#countdown-label")).to_have_text("WAITING FOR THE NEXT SONG")
+    assert page.get_by_role("button", name="Start now", exact=True).is_disabled()
+    add_song(page, "Third fixture", "Test trio")
+    playwright.expect(page.locator("#next-singer")).to_have_text("Test trio")
+    page.get_by_role("button", name="Hold the stage", exact=True).click()
+    playwright.expect(page.locator("#countdown-overlay")).to_be_hidden()
+    assert page.locator("#main-video").evaluate("video => video.ended")
+    page.get_by_role("button", name="Play Third fixture", exact=True).click()
+    playwright.expect(page.locator("#now-playing-title")).to_have_text("Third fixture")
+    assert not errors
+
+
+def test_zero_gap_starts_the_next_song_and_invalid_gaps_are_reported(browser_page):
+    page, errors = browser_page
+    add_song(page, "First fixture")
+    add_song(page, "Second fixture")
+    gap = page.get_by_role("spinbutton", name="Seconds between songs")
+    gap.fill("-1")
+    gap.press("Tab")
+    playwright.expect(page.locator("#playback-error")).to_contain_text("still 30 seconds")
+    gap.fill("0")
+    gap.press("Tab")
+    playwright.expect(page.locator("#playback-error")).to_be_hidden()
+    page.get_by_role("button", name="Play song", exact=True).click()
+    finish_song(page)
+    playwright.expect(page.locator("#now-playing-title")).to_have_text("Second fixture")
+    playwright.expect(page.locator("#countdown-overlay")).to_be_hidden()
     assert not errors
 
 

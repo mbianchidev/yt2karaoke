@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>yt2karaoke | Stage</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='studio.css') }}">
+  <script defer src="{{ url_for('static', filename='stage.js') }}"></script>
+</head>
+<body class="stage-page" data-view="stage">
+  <header class="stage-toolbar">
+    <strong id="stage-title">Karaoke stage</strong>
+    <button type="button" class="button" id="stage-fullscreen">Full screen</button>
+    <button type="button" class="button" id="stage-close">Close stage</button>
+  </header>
+  <main class="external-stage">
+    <video id="stage-video" muted playsinline aria-label="Stage karaoke video" hidden></video>
+    <p id="stage-idle" role="status">Choose a song in the studio. Playback and audio stay controlled there.</p>
+    <div class="countdown-overlay" id="stage-countdown" hidden>
+      <p class="stage-label" id="stage-countdown-label">UP NEXT</p>
+      <h1 id="stage-next-singer">Next singer</h1>
+      <p id="stage-next-song"></p>
+      <output id="stage-seconds" aria-label="Seconds until next song" aria-live="off">30</output>
+    </div>
+  </main>
+  <p class="stage-error" id="stage-error" role="alert" hidden></p>
+</body>
+</html>

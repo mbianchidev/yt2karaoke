@@ -8,7 +8,10 @@
   const state = {
     songs: [], currentId: null, videoUrl: null, lyricsUrl: null,
     lyrics: [], lyricRequest: 0, refreshing: null, live: false,
+    gap: 30, awaitingNext: false, transition: null,
   };
+  const audio = new window.KaraokeAudio(video, { onError: showError, onNotice: showNotice });
+  const stage = new window.KaraokeStage(video, { getCountdown: () => state.transition, onError: showError });
   let noticeTimer;
 
   function icon(name) {
@@ -28,6 +31,10 @@
 
   function currentSong() {
     return state.songs.find((song) => song.id === state.currentId);
+  }
+
+  function playbackUrl(song) {
+    return song?.playback_url || song?.video_url || null;
   }
 
   function showNotice(message) {
@@ -94,8 +101,8 @@
     byId("vocals-input").disabled = !byId("vocals-enabled").checked;
     byId("vocals-input").setAttribute("aria-valuetext", `${percent}% of original vocals`);
     byId("mix-help").textContent = percent === 0
-      ? "Instrumental only. Your voice does the rest."
-      : `${percent}% of the original voice in a separate export. Your instrumental stays untouched.`;
+      ? "Instrumental only. Adjust this slider to hear the original voice live."
+      : `${percent}% original voice, live. Create a separate export to save this vocal guide.`;
     document.querySelectorAll("[data-volume]").forEach((button) => {
       button.setAttribute("aria-pressed", String(Number(button.dataset.volume) === percent));
     });
@@ -104,6 +111,11 @@
     button.disabled = !song?.video_url || song.status !== "READY"
       || (song.rendered_vocals_volume === desiredVolume() && !song.error);
     button.replaceChildren(document.createTextNode(percent === 0 ? "Use instrumental" : "Create vocal mix"), icon("arrow"));
+    audio.setVocalLevel(desiredVolume()).catch(showError);
+    if (playbackUrl(song)) {
+      byId("now-playing-meta").textContent = `${song.performer ? `${song.performer} / ` : ""}${timeLabel(song.duration)} / ${percent}% original vocals / Live mix`;
+      byId("preview-tag").textContent = `${percent === 0 ? "Instrumental" : `${percent}% vocal guide`} / Live`;
+    }
   }
 
   function setMixVolume(percent) {
@@ -147,10 +159,13 @@
     byId("play-toggle").dataset.playing = String(playing);
     byId("play-toggle").setAttribute("aria-label", playing ? "Pause song" : "Play song");
     byId("play-toggle").replaceChildren(icon(playing ? "pause" : "play"));
+    renderRows();
   }
 
   async function startPlayback() {
+    cancelCountdown();
     try {
+      await audio.resume();
       await video.play();
     } catch (error) {
       if (error.name === "NotAllowedError") {
@@ -189,7 +204,7 @@
   }
 
   function updatePreview(song) {
-    const playable = Boolean(song?.video_url);
+    const playable = Boolean(playbackUrl(song));
     const busy = song && ["QUEUED", "DOWNLOADING", "PROCESSING"].includes(song.status);
     const failed = song?.status === "ERROR";
     video.hidden = !playable;
@@ -229,7 +244,9 @@
 
   function selectSong(song, { play = false, preservePlayback = false, syncMix = true } = {}) {
     const changedSong = state.currentId !== song.id;
+    if (changedSong || play) cancelCountdown();
     state.currentId = song.id;
+    audio.setSong(song.vocals_audio_url);
     if (syncMix) {
       setMixVolume(Math.round(song.vocals_volume * 100));
       document.querySelector(`input[name="visual-style"][value="${song.visual_style}"]`).checked = true;
@@ -242,19 +259,20 @@
       byId("lyric-details").open = false;
       byId("lyric-details").hidden = true;
     }
-    if (song.video_url && song.video_url !== state.videoUrl) {
+    const url = playbackUrl(song);
+    if (url && url !== state.videoUrl) {
       const previousTime = preservePlayback ? video.currentTime : 0;
       const resume = preservePlayback && !video.paused;
       video.pause();
-      state.videoUrl = song.video_url;
-      video.src = song.video_url;
+      state.videoUrl = url;
+      video.src = url;
       video.addEventListener("loadedmetadata", () => {
-        if (state.videoUrl !== song.video_url) return;
+        if (state.videoUrl !== url) return;
         video.currentTime = Math.min(previousTime, video.duration || 0);
         syncTimeline();
         if (play || resume) startPlayback();
       }, { once: true });
-    } else if (play && song.video_url) {
+    } else if (play && url) {
       startPlayback();
     }
     if (song.lyrics_url && song.lyrics_url !== state.lyricsUrl) {
@@ -266,9 +284,11 @@
   }
 
   function resetSelection() {
+    cancelCountdown();
     video.pause();
     video.removeAttribute("src");
     video.load();
+    audio.setSong(null);
     state.currentId = null;
     state.videoUrl = null;
     state.lyrics = [];
@@ -278,6 +298,58 @@
     byId("lyric-list").replaceChildren();
     updatePreview(null);
     syncTimeline();
+  }
+
+  function cancelCountdown() {
+    state.awaitingNext = false;
+    state.transition = null;
+    byId("countdown-overlay").hidden = true;
+    byId("countdown-announcement").textContent = "";
+    stage.sync();
+  }
+
+  function reconcileCountdown() {
+    if (!state.awaitingNext) return;
+    const index = state.songs.findIndex((song) => song.id === state.currentId);
+    const following = state.songs.slice(index + 1);
+    const next = following.find((song) => song.status === "READY" && playbackUrl(song));
+    if (!next) {
+      const pending = following.find((song) => ["QUEUED", "DOWNLOADING", "PROCESSING"].includes(song.status));
+      state.transition = {
+        nextId: null, deadline: null, waiting: true,
+        performer: pending?.performer || "Next singer",
+        title: pending ? (pending.title || "Preparing the next song") : "Add the next song to the queue",
+        label: pending ? "GETTING THE NEXT SONG READY" : "WAITING FOR THE NEXT SONG",
+      };
+    } else if (state.transition?.nextId !== next.id) {
+      state.transition = {
+        nextId: next.id, deadline: Date.now() + state.gap * 1000, waiting: false,
+        performer: next.performer || "Next singer", title: next.title || "Next song",
+        label: "UP NEXT",
+      };
+      byId("countdown-announcement").textContent = `Up next: ${state.transition.performer}, ${state.transition.title}. Starts in ${state.gap} seconds.`;
+    }
+    renderCountdown();
+  }
+
+  function renderCountdown() {
+    const transition = state.transition;
+    if (!state.awaitingNext || !transition) return;
+    const seconds = transition.waiting ? null : Math.max(0, Math.ceil((transition.deadline - Date.now()) / 1000));
+    byId("countdown-overlay").hidden = false;
+    byId("next-singer").textContent = transition.performer;
+    byId("next-song").textContent = transition.title;
+    byId("countdown-seconds").textContent = seconds === null ? "--" : String(seconds);
+    byId("countdown-label").textContent = transition.label;
+    byId("start-next").disabled = transition.waiting;
+    if (seconds === 0) startNextSong();
+    else stage.sync();
+  }
+
+  function startNextSong() {
+    const next = state.songs.find((song) => song.id === state.transition?.nextId);
+    if (next?.status === "READY" && playbackUrl(next)) selectSong(next, { play: true });
+    else reconcileCountdown();
   }
 
   function queueButton(action, symbol) {
@@ -325,12 +397,14 @@
       row.dataset.selected = String(song.id === state.currentId);
       const title = song.title || song.url || "Local track";
       const busy = ["DOWNLOADING", "PROCESSING"].includes(song.status);
+      const playing = song.id === state.currentId && !video.paused && !video.ended;
       row.querySelector(".queue-number").textContent = String(index + 1).padStart(2, "0");
       row.querySelector(".queue-title").textContent = title;
       row.querySelector(".queue-title").title = title;
       row.querySelector(".queue-subtitle").textContent = busy
-        ? song.stage : `${song.source === "upload" ? "Local file" : "YouTube"} / ${Math.round(song.vocals_volume * 100)}% vocal guide`;
-      row.querySelector(".queue-status").textContent = busy ? `${song.progress}%` : ({
+        ? `${song.performer ? `${song.performer} / ` : ""}${song.stage}`
+        : `${song.performer ? `${song.performer} / ` : ""}${song.source === "upload" ? "Local file" : "YouTube"} / ${Math.round(song.vocals_volume * 100)}% vocal guide`;
+      row.querySelector(".queue-status").textContent = busy ? `${song.progress}%` : playing ? "Playing" : ({
         QUEUED: "Queued", READY: "Ready", ERROR: "Failed", PLAYING: "Playing", DONE: "Played",
       }[song.status] || song.status);
       const progress = row.querySelector("progress");
@@ -369,12 +443,13 @@
       selectSong(songs.find((song) => song.video_url));
     } else if (!selected && songs.length) {
       selectSong(songs.find((song) => song.video_url) || songs[0]);
-    } else if (selected?.video_url !== state.videoUrl && selected?.video_url) {
+    } else if (playbackUrl(selected) !== state.videoUrl && playbackUrl(selected)) {
       selectSong(selected, { preservePlayback: true, syncMix: false });
     } else {
       updatePreview(selected);
       renderRows();
     }
+    reconcileCountdown();
     if (songs.some((song) => {
       const previous = previousSongs.find((entry) => entry.id === song.id);
       return song.status === "READY" && !song.error && song.rendered_vocals_volume > 0
@@ -388,7 +463,10 @@
     byId("add-btn").querySelector("span").textContent = "Adding song";
     byId("form-error").hidden = true;
     try {
-      const options = { title: byId("title-input").value.trim(), vocals_volume: desiredVolume(), visual_style: visualStyle() };
+      const options = {
+        title: byId("title-input").value.trim(), performer: byId("performer-input").value.trim(),
+        vocals_volume: desiredVolume(), visual_style: visualStyle(),
+      };
       const upload = document.querySelector('input[name="source-mode"]:checked').value === "upload";
       if (upload) {
         const audio = byId("audio-input").files[0];
@@ -406,6 +484,7 @@
       }
       byId("url-input").value = "";
       byId("title-input").value = "";
+      byId("performer-input").value = "";
       byId("audio-input").value = "";
       byId("lyrics-input").value = "";
       byId("optional-settings").open = false;
@@ -478,11 +557,28 @@
     byId("video-wrapper").dataset.style = visualStyle();
   }));
   byId("play-toggle").addEventListener("click", () => { if (video.paused) startPlayback(); else video.pause(); });
+  byId("start-next").addEventListener("click", startNextSong);
+  byId("cancel-countdown").addEventListener("click", () => {
+    cancelCountdown();
+    showNotice("Countdown held. Press play or choose a song from the queue when you are ready.");
+  });
+  byId("song-gap").addEventListener("change", () => {
+    const input = byId("song-gap");
+    const seconds = input.valueAsNumber;
+    if (!Number.isSafeInteger(seconds) || seconds < 0 || !Number.isSafeInteger(Date.now() + seconds * 1000)) {
+      input.setAttribute("aria-invalid", "true");
+      showError(new Error(`Enter a whole number of seconds, zero or greater. The countdown is still ${state.gap} seconds.`), byId("playback-error"));
+      return;
+    }
+    input.removeAttribute("aria-invalid");
+    byId("playback-error").hidden = true;
+    state.gap = seconds;
+    if (state.transition && !state.transition.waiting) state.transition.deadline = Date.now() + seconds * 1000;
+    renderCountdown();
+  });
   byId("seek-input").addEventListener("input", () => {
     if (Number.isFinite(video.duration)) { video.currentTime = video.duration * Number(byId("seek-input").value) / 1000; syncTimeline(); }
   });
-  video.volume = Number(byId("volume-input").value) / 100;
-  byId("volume-input").addEventListener("input", () => { video.volume = Number(byId("volume-input").value) / 100; });
   byId("fullscreen-btn").addEventListener("click", async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -499,9 +595,8 @@
     if (state.videoUrl) showError(new Error("This video could not be played. Try the MP4 download or refresh the queue."));
   });
   video.addEventListener("ended", () => {
-    const index = state.songs.findIndex((song) => song.id === state.currentId);
-    const next = state.songs.slice(index + 1).find((song) => song.status === "READY" && song.video_url);
-    if (next) selectSong(next, { play: true });
+    state.awaitingNext = true;
+    reconcileCountdown();
   });
 
   setSourceMode();
@@ -531,5 +626,13 @@
       console.warn(error.message);
     });
   }, 5000);
-  window.addEventListener("pagehide", () => { clearInterval(polling); clearTimeout(noticeTimer); });
+  const countdownClock = setInterval(renderCountdown, 200);
+  window.addEventListener("pagehide", () => {
+    clearInterval(polling);
+    clearInterval(countdownClock);
+    clearTimeout(noticeTimer);
+    audio.destroy();
+    stage.destroy();
+  });
+  window.addEventListener("pageshow", (event) => { if (event.persisted) location.reload(); });
 })();

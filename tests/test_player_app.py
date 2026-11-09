@@ -72,6 +72,64 @@ def test_add_to_queue(app_client):
     assert "id" in data
 
 
+@pytest.mark.parametrize("source", ["youtube", "upload"])
+def test_queue_keeps_singer_name(app_client, source):
+    if source == "youtube":
+        response = app_client.post("/api/queue", json={
+            "url": "https://youtube.com/watch?v=synthetic", "performer": "  Test duo  ",
+        })
+    else:
+        response = app_client.post("/api/queue/upload", data={
+            "audio": (BytesIO(b"generated audio fixture"), "test.wav"),
+            "performer": "  Test duo  ",
+        })
+    assert response.status_code == 201
+    song = app_client.get(f"/api/queue/{response.json['id']}").json
+    assert song["performer"] == "Test duo"
+
+
+@pytest.mark.parametrize("performer", [None, 42, [], "x" * 101])
+def test_queue_rejects_invalid_singer_names(app_client, performer):
+    response = app_client.post("/api/queue", json={
+        "url": "https://youtube.com/watch?v=synthetic", "performer": performer,
+    })
+    assert response.status_code == 400
+    assert "performer" in response.json["error"]
+
+
+def test_live_playback_uses_instrumental_and_full_strength_vocals(app_client, tmp_path):
+    from yt2karaoke.player.queue import SongStatus
+
+    response = app_client.post("/api/queue", json={"url": "https://youtube.com/watch?v=synthetic"})
+    song_id = response.json["id"]
+    song = app_client.application.extensions["song_queue"].get_song(song_id)
+    song.video_path = tmp_path / "karaoke.mp4"
+    song.video_path.write_bytes(b"generated video fixture")
+    song.instrumental_path = tmp_path / "instrumental.wav"
+    song.instrumental_path.write_bytes(b"generated instrumental fixture")
+    song.vocals_path = tmp_path / "vocals.wav"
+    original_vocals = b"generated full-strength vocal fixture"
+    song.vocals_path.write_bytes(original_vocals)
+    song.status = SongStatus.READY
+    song.rendered_vocals_volume = 0.25
+    song.mixes = {0.0: song.video_path, 0.25: tmp_path / "mix.mp4"}
+    snapshot = app_client.get(f"/api/queue/{song_id}").json
+    assert snapshot["playback_url"] == f"/video/{song_id}?vocals=0"
+    stem = app_client.get(snapshot["vocals_audio_url"])
+    assert stem.status_code == 200
+    assert stem.mimetype == "audio/wav"
+    assert stem.data == original_vocals
+    partial = app_client.get(snapshot["vocals_audio_url"], headers={"Range": "bytes=0-8"})
+    assert partial.status_code == 206
+    assert partial.data == original_vocals[:9]
+    assert app_client.get(f"/audio/{song_id}/instrumental").data == b"generated instrumental fixture"
+    assert app_client.get(f"/audio/{song_id}/unknown").status_code == 400
+    song.vocals_path.unlink()
+    missing = app_client.get(snapshot["vocals_audio_url"])
+    assert missing.status_code == 404
+    assert missing.json["error"]
+
+
 def test_add_to_queue_missing_url(app_client):
     resp = app_client.post(
         "/api/queue",
@@ -230,5 +288,9 @@ def test_ready_song_can_be_removed(app_client):
 
 
 def test_studio_assets_are_served(app_client):
-    for path in ("/static/studio.css", "/static/studio.js", "/static/theme.js", "/static/vendor/socket.io.min.js"):
+    for path in (
+        "/stage", "/static/studio.css", "/static/studio.js", "/static/theme.js",
+        "/static/audio-mixer.js", "/static/pitch-processor.js", "/static/stage.js",
+        "/static/vendor/socket.io.min.js",
+    ):
         assert app_client.get(path).status_code == 200
