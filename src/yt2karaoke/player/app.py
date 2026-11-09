@@ -118,7 +118,7 @@ def create_app(
 
     @app.errorhandler(HTTPException)
     def api_error(error: HTTPException):
-        if request.path.startswith(("/api/", "/video/", "/lyrics/")):
+        if request.path.startswith(("/api/", "/video/", "/audio/", "/lyrics/")):
             app.logger.warning("Request rejected (%s): %s", error.code, error.description)
             return jsonify(error=error.description, description=error.description), error.code
         return error
@@ -129,10 +129,13 @@ def create_app(
             abort(400, description="Send a JSON object with the song options.")
         return data
 
-    def options(data, *, form: bool = False) -> tuple[str, float, str]:
+    def options(data, *, form: bool = False) -> tuple[str, float, str, str]:
         title = data.get("title", "")
         if not isinstance(title, str) or len(title) > 200:
             abort(400, description="title must be text, up to 200 characters.")
+        performer = data.get("performer", "")
+        if not isinstance(performer, str) or len(performer) > 100:
+            abort(400, description="performer must be text, up to 100 characters.")
         volume = data.get("vocals_volume", default_volume)
         if form:
             try:
@@ -146,7 +149,7 @@ def create_app(
         style = data.get("visual_style", visual_style)
         if style not in ("plasma", "gradient"):
             abort(400, description="visual_style must be plasma or gradient.")
-        return title.strip(), volume, style
+        return title.strip(), volume, style, performer.strip()
 
     @app.get("/")
     def index():
@@ -180,8 +183,8 @@ def create_app(
             valid_url = False
         if not valid_url:
             abort(400, description="Use a YouTube video URL, or upload a local audio file.")
-        title, volume, style = options(data)
-        song = queue.add(url, title, vocals_volume=volume, visual_style=style)
+        title, volume, style, performer = options(data)
+        song = queue.add(url, title, vocals_volume=volume, visual_style=style, performer=performer)
         _emit_queue_update(socketio, queue)
         return jsonify(song.to_dict()), 201
 
@@ -191,7 +194,7 @@ def create_app(
         extensions = {".wav", ".mp3", ".flac", ".m4a", ".ogg", ".aac", ".mp4", ".webm", ".aiff", ".aif"}
         if not audio or Path(secure_filename(audio.filename or "")).suffix.lower() not in extensions:
             abort(400, description="Choose a WAV, MP3, FLAC, M4A, OGG, AAC, MP4, WebM or AIFF file.")
-        title, volume, style = options(request.form, form=True)
+        title, volume, style, performer = options(request.form, form=True)
         source_dir = Path(tempfile.mkdtemp(dir=output_dir, prefix=".upload_"))
         audio_path = source_dir / ("source" + Path(audio.filename).suffix.lower())
         lyrics_path = None
@@ -215,7 +218,7 @@ def create_app(
             song = queue.add(
                 "", title or Path(secure_filename(audio.filename)).stem,
                 audio_path=audio_path, lyrics_path=lyrics_path,
-                vocals_volume=volume, visual_style=style,
+                vocals_volume=volume, visual_style=style, performer=performer,
             )
         except Exception:
             audio_path.unlink(missing_ok=True)
@@ -256,7 +259,7 @@ def create_app(
             if not queue.retry(song_id):
                 abort(409, description="Only failed conversions can be retried.")
         elif direction == "mix":
-            _, volume, _ = options(json_body())
+            _, volume, _, _ = options(json_body())
             if not queue.request_mix(song_id, volume):
                 abort(409, description="Wait for the song to finish before creating a vocal mix.")
             song = queue.get_song(song_id)
@@ -285,6 +288,23 @@ def create_app(
             as_attachment=request.args.get("download") == "1",
             download_name=f"{_safe_filename(song.title)}_{suffix}.mp4",
         )
+
+    @app.get("/audio/<song_id>/<stem>")
+    def serve_audio(song_id: str, stem: str):
+        song = queue.get_song(song_id)
+        if song is None:
+            abort(404, description="Song not found.")
+        paths = {"instrumental": song.instrumental_path, "vocals": song.vocals_path}
+        if stem not in paths:
+            abort(400, description="Choose instrumental or vocals audio.")
+        path = paths[stem]
+        if path is None or not path.is_file():
+            abort(404, description="The saved audio stem is not available. Convert the song again.")
+        return send_file(path, mimetype="audio/wav", conditional=True)
+
+    @app.get("/stage")
+    def stage():
+        return render_template("stage.html")
 
     @app.get("/lyrics/<song_id>")
     def serve_lyrics(song_id: str):

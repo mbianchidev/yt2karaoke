@@ -33,12 +33,21 @@ pytest tests/live -m live_youtube
 # JavaScript syntax
 node --check src/yt2karaoke/player/static/theme.js
 node --check src/yt2karaoke/player/static/studio.js
+node --check src/yt2karaoke/player/static/audio-mixer.js
+node --check src/yt2karaoke/player/static/pitch-processor.js
+node --check src/yt2karaoke/player/static/stage.js
 
 # Wheel and source distribution using uv's isolated build backend
 uv build
 ```
 
 The browser tests run with both light and dark system preferences and use generated sine-wave media and original test lyrics. Download, separation and transcription services are mocked in these deterministic tests; the pipeline, video encoder, remix, HTTP server, queue, browser controls and file downloads are real. Theme checks cover keyboard selection, persistence, system changes, cross-tab synchronization, blocked storage, contrast and narrow layouts.
+
+Live-audio tests measure the actual mixed 220 Hz backing and 880 Hz vocal amplitudes, including a fourfold increase from 25% to 100% vocals, unchanged backing gain, master mute and independent source levels. Microphone tests use Chromium's fake capture device, never the host microphone. They cover opt-in muted monitoring, actual pitch/EQ/compressor parameters, permission errors, stopped tracks and page cleanup. Speaker switching uses mocked sink selection; physical device routing and hardware latency still need a manual check on the target setup.
+
+Stage-window tests verify muted playback, play/pause/seek synchronization and reload recovery. Queue journeys cover a second singer adding songs in another tab without taking over playback, names on both countdown views, configurable gaps, hold, removal of the upcoming song and zero-gap advancement.
+
+`tests/test_browser_audio.py` runs the dependency-free Node tests in `tests/js/pitch-processor.test.cjs` as part of pytest. These feed generated PCM through the AudioWorklet processor and measure high/low pitch, unchanged duration, wet/dry gain, silence and shutdown. Node is optional for local-only conversions; this DSP check skips when it is absent. CI already installs Node for YouTube extraction.
 
 The encoded-media tests verify H.264/AAC, 16:9 output, `yuv420p`, fast-start metadata, the absence of the test vocal frequency in the instrumental, the requested 25% gain, unchanged instrumental gain, unchanged video frames after remix, and individual highlighting of repeated words. These tests skip if ffmpeg is unavailable.
 
@@ -85,9 +94,13 @@ This is a live external-service test: network errors, unavailable media, YouTube
 | `player/queue.py` | Thread-safe song queue and serialized jobs |
 | `player/app.py` | Flask/Socket.IO routes, upload cleanup and media serving |
 | `player/templates/index.html` | Accessible studio structure |
+| `player/templates/stage.html` | Separate, video-only performance window |
 | `player/static/studio.css` | Light/dark palettes, responsive studio and reduced-motion styles |
 | `player/static/theme.js` | Pre-render theme selection, browser persistence and system changes |
-| `player/static/studio.js` | Queue, player, per-song mix controls and errors |
+| `player/static/studio.js` | Queue, player, singer countdowns, per-song mixes and errors |
+| `player/static/audio-mixer.js` | Web Audio routing, device selection, live stem gain, mic EQ/compression and capture cleanup |
+| `player/static/pitch-processor.js` | Streaming dual-delay AudioWorklet pitch shift and wet/dry blend |
+| `player/static/stage.js` | Same-origin, muted stage synchronization and optional display placement |
 
 ## Self-hosted assets
 

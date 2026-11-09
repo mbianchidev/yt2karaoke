@@ -45,6 +45,7 @@ class QueuedSong:
     progress: int = 0
     duration: float = 0.0
     mixes: dict[float, Path] = field(default_factory=dict)
+    performer: str = ""
 
     def to_dict(self) -> dict:
         available = self.video_path is not None and self.rendered_vocals_volume in self.mixes
@@ -52,6 +53,7 @@ class QueuedSong:
             "id": self.song_id,
             "url": self.youtube_url,
             "title": self.title,
+            "performer": self.performer,
             "status": self.status.name,
             "video_path": str(self.video_path) if self.video_path else None,
             "error": self.error,
@@ -65,6 +67,10 @@ class QueuedSong:
             "video_url": (
                 f"/video/{self.song_id}?vocals={self.rendered_vocals_volume:g}"
                 if available else None
+            ),
+            "playback_url": f"/video/{self.song_id}?vocals=0" if available else None,
+            "vocals_audio_url": (
+                f"/audio/{self.song_id}/vocals" if available and self.vocals_path else None
             ),
             "instrumental_url": f"/video/{self.song_id}?vocals=0&download=1" if available else None,
             "mix_url": (
@@ -112,6 +118,7 @@ class SongQueue:
         youtube_url: str,
         title: str = "",
         *,
+        performer: str = "",
         audio_path: Optional[Path] = None,
         lyrics_path: Optional[Path] = None,
         vocals_volume: float = 0.0,
@@ -134,6 +141,7 @@ class SongQueue:
         song = QueuedSong(
             youtube_url=youtube_url, title=title, audio_path=audio_path,
             lyrics_path=lyrics_path, vocals_volume=volume, visual_style=visual_style,
+            performer=performer,
         )
         with self._lock:
             self._songs.append(song)

@@ -10,6 +10,8 @@
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static', filename='studio.css') }}">
   <script defer src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='audio-mixer.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='stage.js') }}"></script>
   <script defer src="{{ url_for('static', filename='studio.js') }}"></script>
 </head>
 <body data-default-vocals="{{ default_vocals_volume }}" data-default-style="{{ default_visual_style }}">
@@ -20,6 +22,7 @@
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></symbol>
     <symbol id="i-expand" viewBox="0 0 24 24"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/></symbol>
     <symbol id="i-volume" viewBox="0 0 24 24"><path d="m11 5-5 4H3v6h3l5 4ZM15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></symbol>
+    <symbol id="i-muted" viewBox="0 0 24 24"><path d="m11 5-5 4H3v6h3l5 4ZM16 9l6 6m-6 0 6-6"/></symbol>
     <symbol id="i-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
     <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="i-remove" viewBox="0 0 24 24"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7m4-7v7"/></symbol>
@@ -89,6 +92,11 @@
             <span>Add to queue</span>
           </button>
         </div>
+        <div class="performer-field">
+          <label for="performer-input">Singer / group name</label>
+          <input id="performer-input" type="text" maxlength="100" placeholder="Who is singing? (optional)" aria-describedby="performer-help">
+          <p id="performer-help">Shown in the queue and on the stage before your song.</p>
+        </div>
         <div class="source-foot">
           <p id="source-help">Use audio you are authorized to process. We'll separate the vocals and sync the lyrics.</p>
           <details class="optional-settings" id="optional-settings">
@@ -116,6 +124,7 @@
         <div class="stage-shell" id="stage-shell">
           <div class="video-wrapper" id="video-wrapper" data-style="plasma">
             <video id="main-video" controls preload="metadata" playsinline hidden aria-label="Karaoke video"></video>
+            <audio id="original-vocals" preload="metadata" hidden></audio>
             <div class="empty-stage" id="no-video-placeholder">
               <div class="stage-orbit" aria-hidden="true"></div>
               <span class="stage-label">THE STAGE IS YOURS</span>
@@ -129,14 +138,25 @@
               <p id="processing-description">Your karaoke video is on its way.</p>
               <progress id="processing-progress" max="100" value="0" aria-label="Song processing progress"></progress>
             </div>
+            <div class="countdown-overlay" id="countdown-overlay" hidden>
+              <p class="stage-label" id="countdown-label">UP NEXT</p>
+              <h2 id="next-singer">Next singer</h2>
+              <p id="next-song"></p>
+              <output id="countdown-seconds" aria-label="Seconds until next song" aria-live="off">30</output>
+              <div class="countdown-actions">
+                <button type="button" class="button" id="start-next">Start now</button>
+                <button type="button" class="button" id="cancel-countdown">Hold the stage</button>
+              </div>
+            </div>
           </div>
+          <p class="sr-only" id="countdown-announcement" role="status"></p>
           <div class="player-controls">
             <button type="button" class="icon-button play-toggle" id="play-toggle" aria-label="Play song" disabled><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg></button>
             <span class="time-readout" id="elapsed-time">0:00</span>
             <label class="sr-only" for="seek-input">Seek through song</label>
             <input type="range" class="seek-input" id="seek-input" min="0" max="1000" value="0" disabled>
             <span class="time-readout" id="duration-time">0:00</span>
-            <svg class="icon volume-icon" aria-hidden="true"><use href="#i-volume"/></svg>
+            <button type="button" class="icon-button volume-icon" id="master-mute" aria-label="Mute speakers" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-volume"/></svg></button>
             <label class="sr-only" for="volume-input">Playback volume</label>
             <input type="range" class="volume-input" id="volume-input" min="0" max="100" value="80">
             <button type="button" class="icon-button" id="fullscreen-btn" aria-label="Full screen" disabled><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg></button>
@@ -160,7 +180,7 @@
       <aside class="mixer-card" aria-labelledby="mixer-heading">
         <div class="panel-heading">
           <h2 id="mixer-heading">Your mix</h2>
-          <span class="subtle-tag">VOCAL GUIDE</span>
+          <span class="subtle-tag">LIVE VOCAL GUIDE</span>
         </div>
         <div class="mixer-body">
           <label class="toggle-label" for="vocals-enabled"><span>Add original vocals</span><input type="checkbox" id="vocals-enabled" aria-describedby="mix-help"></label>
@@ -173,7 +193,7 @@
             <button type="button" data-volume="25" aria-label="Light guide, 25% vocals" aria-pressed="false">Light guide<span>25%</span></button>
             <button type="button" data-volume="50" aria-label="Sing along, 50% vocals" aria-pressed="false">Sing along<span>50%</span></button>
           </div>
-          <p class="mix-help" id="mix-help">Instrumental only. Your voice does the rest.</p>
+          <p class="mix-help" id="mix-help">Adjust the original voice live. Create a separate export when you want to save it.</p>
           <button type="button" class="button button-mix" id="apply-mix" disabled>Use instrumental<svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
           <p id="mix-error" class="inline-error" role="alert" hidden></p>
           <a id="download-mix" class="mix-download" hidden><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span></span></a>
@@ -190,11 +210,77 @@
       </aside>
     </div>
 
+    <section class="live-card" aria-labelledby="live-heading">
+      <div class="panel-heading">
+        <h2 id="live-heading">Live sound</h2>
+        <span class="subtle-tag">MIC / VOICE / SPEAKERS</span>
+      </div>
+      <div class="live-channels">
+        <fieldset class="live-channel">
+          <legend>Your microphone</legend>
+          <label class="device-label" for="mic-device">Microphone</label>
+          <select id="mic-device"><option value="">System default microphone</option></select>
+          <button type="button" class="button button-mix" id="mic-toggle" disabled>Enable microphone</button>
+          <p class="channel-status" id="mic-status" role="status">Microphone off</p>
+          <label class="meter-label" for="mic-meter">Input level</label>
+          <meter id="mic-meter" min="0" max="1" value="0" low="0.05" high="0.8" optimum="0.3">0</meter>
+          <label class="toggle-label monitor-control" for="mic-monitor"><span>Hear my microphone</span><input id="mic-monitor" type="checkbox" disabled aria-describedby="mic-help"></label>
+          <div class="fader-label"><label for="mic-volume">Microphone volume</label><output id="mic-volume-value" for="mic-volume">80%</output></div>
+          <input id="mic-volume" data-audio-control type="range" min="0" max="100" value="80">
+          <p class="channel-help" id="mic-help">Use headphones before monitoring to avoid feedback. The mic starts muted; its audio stays in this browser.</p>
+          <button type="button" class="button button-quiet" id="refresh-devices">Refresh devices</button>
+        </fieldset>
+        <fieldset class="live-channel voice-channel">
+          <legend>Shape your voice</legend>
+          <div class="pitch-presets" aria-label="Live voice presets">
+            <button type="button" data-pitch="0" aria-pressed="true">Natural</button>
+            <button type="button" data-pitch="7" aria-pressed="false">High pitch</button>
+            <button type="button" data-pitch="-7" aria-pressed="false">Low pitch</button>
+          </div>
+          <div class="fader-label"><label for="pitch-input">Voice pitch</label><output id="pitch-value" for="pitch-input">0 st</output></div>
+          <input id="pitch-input" data-audio-control type="range" min="-12" max="12" value="0">
+          <div class="fader-label"><label for="effect-mix">Pitch effect mix</label><output id="effect-mix-value" for="effect-mix">100%</output></div>
+          <input id="effect-mix" data-audio-control type="range" min="0" max="100" value="100">
+          <div class="eq-controls">
+            <div><div class="fader-label"><label for="eq-bass">Bass</label><output id="eq-bass-value" for="eq-bass">0 dB</output></div><input id="eq-bass" data-audio-control type="range" min="-12" max="12" value="0"></div>
+            <div><div class="fader-label"><label for="eq-mid">Mid</label><output id="eq-mid-value" for="eq-mid">0 dB</output></div><input id="eq-mid" data-audio-control type="range" min="-12" max="12" value="0"></div>
+            <div><div class="fader-label"><label for="eq-treble">Treble</label><output id="eq-treble-value" for="eq-treble">0 dB</output></div><input id="eq-treble" data-audio-control type="range" min="-12" max="12" value="0"></div>
+          </div>
+          <div class="fader-label"><label for="compression">Compression</label><output id="compression-value" for="compression">0%</output></div>
+          <input id="compression" data-audio-control type="range" min="0" max="100" value="0">
+          <p class="channel-help">Effects change only your live microphone, not the song speed, original singer, or downloads. Compression evens out loud and quiet notes.</p>
+        </fieldset>
+        <fieldset class="live-channel">
+          <legend>Speakers &amp; stage</legend>
+          <label class="device-label" for="speaker-device">Speakers</label>
+          <select id="speaker-device"><option value="">System default speakers</option></select>
+          <button type="button" class="button button-quiet" id="choose-speakers" hidden>Choose speakers</button>
+          <p class="channel-help" id="speaker-help"></p>
+          <div class="fader-label"><label for="speaker-volume">Speaker volume</label><output id="speaker-volume-value" for="speaker-volume">80%</output></div>
+          <input id="speaker-volume" type="range" min="0" max="100" value="80">
+          <div class="fader-label"><label for="backing-volume">Backing track volume</label><output id="backing-volume-value" for="backing-volume">100%</output></div>
+          <input id="backing-volume" data-audio-control type="range" min="0" max="100" value="100">
+          <div class="stage-output-controls" data-stage-url="{{ url_for('stage') }}">
+            <button type="button" class="button button-mix" id="stage-window-toggle" aria-describedby="stage-output-help">Open stage window</button>
+            <button type="button" class="button button-quiet" id="find-displays">Find displays</button>
+            <div id="stage-display-field" hidden><label class="device-label" for="stage-display">Stage display</label><select id="stage-display"></select></div>
+            <p class="channel-help" id="stage-output-help">Keep the controls here. Move the stage window to any screen and use its full-screen button. Audio plays once, through your selected speakers.</p>
+          </div>
+        </fieldset>
+      </div>
+    </section>
+
     <section class="queue-card" id="queue" aria-labelledby="queue-heading">
       <div class="queue-heading">
         <div><h2 id="queue-heading">Up next <span id="queue-count">0 songs</span></h2><p>One song at a time. A whole night ahead.</p></div>
         <button type="button" class="button button-quiet" id="refresh-btn"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh queue</button>
       </div>
+      <div class="playback-settings">
+        <label for="song-gap">Seconds between songs</label>
+        <input id="song-gap" type="number" min="0" step="1" value="30" inputmode="numeric" aria-describedby="song-gap-help">
+        <p id="song-gap-help">The next singer gets a countdown. Set 0 for an immediate start.</p>
+      </div>
+      <p class="inline-error" id="playback-error" role="alert" hidden></p>
       <ol id="queue-list" aria-label="Song queue" hidden></ol>
       <div class="empty-queue" id="empty-queue"><span class="empty-queue-icon" aria-hidden="true"><svg class="icon"><use href="#i-music"/></svg></span><p><strong>The queue is all yours.</strong><span>Add a link or local track above to get the first song ready.</span></p></div>
     </section>
