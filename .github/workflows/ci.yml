@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Tests, JavaScript and package build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out the tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the test environment
+        uses: ./.github/actions/setup-environment
+
+      - name: Check JavaScript syntax
+        run: |
+          for script in src/yt2karaoke/player/static/*.js; do
+            node --check "$script"
+          done
+
+      - name: Run deterministic tests
+        run: python -m pytest tests -m "not live_youtube"
+
+      - name: Build wheel and source archive
+        run: uv build

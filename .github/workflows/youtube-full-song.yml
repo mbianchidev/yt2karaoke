@@ -1,17 +1,14 @@
 name: Full-song karaoke CI
 
+# Manual only: YouTube blocks GitHub-hosted runners, so this cannot gate PRs.
 on:
-  pull_request:
-    types: [ready_for_review]
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: full-song-karaoke-${{ github.event.pull_request.number || github.ref }}
+  group: full-song-karaoke-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -40,33 +37,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node for YouTube extraction
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "26"
-
-      - name: Set up Python and cached dependencies
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          version: "0.13.7"
-          python-version: "3.14"
-          activate-environment: true
-          enable-cache: true
-          cache-dependency-glob: |
-            requirements.txt
-            setup.py
-            pyproject.toml
-
-      - name: Install system media tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ffmpeg
-
-      - name: Install CPU-only project and browser dependencies
-        run: |
-          uv pip install --torch-backend=cpu -e ".[dev]"
-          uv pip check
-          python -m playwright install --with-deps chromium
+      - name: Set up the test environment
+        uses: ./.github/actions/setup-environment
 
       - name: Restore public model weights
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -88,8 +60,9 @@ jobs:
 
       - name: Run deterministic tests and JavaScript checks
         run: |
-          node --check src/yt2karaoke/player/static/theme.js
-          node --check src/yt2karaoke/player/static/studio.js
+          for script in src/yt2karaoke/player/static/*.js; do
+            node --check "$script"
+          done
           python -m pytest tests -m "not live_youtube" \
             --junitxml="$YT2KARAOKE_ARTIFACT_DIR/unit.xml"
 

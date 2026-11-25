@@ -41,6 +41,15 @@ For either setup, run the launcher from the directory where you want `karaoke_ou
 
 The player is a local development server. Keep the default loopback host; do not expose it publicly. The queue is held in memory for the running session. Exported videos, stems and lyrics remain in the output directory after shutdown.
 
+If something does not work, see [Troubleshooting](troubleshooting.md).
+
+### Stored data and uninstalling
+
+- **Outputs** stay in the output directory (`karaoke_output` for the player, the current directory for `convert`) until you delete them. Temporary `.yt2karaoke_work_*` folders are removed after each conversion. Uploaded source files are removed after a successful conversion or when you remove the song from the queue; a failed upload is kept so you can retry it.
+- **Models** are cached by their libraries, typically Demucs weights in `~/.cache/torch/hub/checkpoints` and Whisper weights in `~/.cache/whisper`. Other tools that use those libraries may share these caches; delete them only if nothing else needs them.
+- **Browser**: the studio saves only its theme preference in the browser's local storage for the studio address.
+- **Program**: for a source checkout, deactivate and delete its `.venv` folder. For a release wheel run with `uvx`, `uv cache clean yt2karaoke` removes uv's cached copy.
+
 ## Studio appearance
 
 Use **Theme** in the header to choose **System**, **Light**, or **Dark**. System is the default and follows your operating system's appearance, including changes while the studio is open. An explicit Light or Dark choice overrides the system setting.
