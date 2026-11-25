@@ -96,7 +96,7 @@ You are responsible for everything you contribute, including AI-assisted code, d
 
 ## Contributing
 
-Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), which points coding agents to [AGENTS.md](AGENTS.md), and follow the [Code of Conduct](CODE_OF_CONDUCT.md) and [accessibility guidelines](ACCESSIBILITY.md).
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), which points coding agents to [AGENTS.md](AGENTS.md), and follow the [Code of Conduct](CODE_OF_CONDUCT.md) and [accessibility guidelines](ACCESSIBILITY.md). Every pull request runs [CI](docs/development.md#checks) (tests, JavaScript checks and package build); the live full-song YouTube test is [manual only](docs/development.md#full-song-ci).
 
 ## Security
 

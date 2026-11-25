@@ -13,8 +13,9 @@ Read [README.md](README.md), [CONTRIBUTING.md](CONTRIBUTING.md), and the
 - `tests/`: deterministic unit, media, and Playwright tests; `tests/live/` is
   the opt-in full-song YouTube test; `tests/js/` holds Node DSP tests.
 - `scripts/ci_audit_requirements.py`: dependency audit helper used by CI.
-- `.github/workflows/`: `ci.yml` (every PR), `youtube-full-song.yml`
-  (ready-for-review, `main`, manual), `publish.yml` (GitHub Releases).
+- `.github/workflows/`: `ci.yml` (every PR and `main` push, required),
+  `youtube-full-song.yml` (manual dispatch only), `publish.yml` (GitHub
+  Releases).
 - `docs/`: [user and developer documentation](docs/README.md).
 
 ## Setup and checks

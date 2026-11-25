@@ -48,8 +48,11 @@ Follow [ACCESSIBILITY.md](ACCESSIBILITY.md) for studio and stage changes.
    `node --check` for changed studio scripts.
 4. Open the pull request using the template. Explain the problem, the solution,
    and the checks you ran, and state anything you could not verify.
-5. The **CI** workflow runs on every pull request. Maintainers may also run the
-   live full-song YouTube workflow by marking a draft ready for review.
+5. The **CI** workflow runs on every pull request and must pass. The live
+   full-song YouTube workflow is manual only, because YouTube blocks hosted
+   runners; maintainers may run it by hand or ask for a local
+   `pytest tests/live -m live_youtube` result. See
+   [Full-song CI](docs/development.md#full-song-ci).
 6. Respond to review feedback and keep CI green.
 
 There is no separate formatter or linter configured; follow the surrounding
