@@ -1,0 +1,83 @@
+name: Bug report
+description: Report a problem with the studio, CLI, Python API, or exported media.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Search [existing issues](https://github.com/mbianchidev/yt2karaoke/issues) first.
+        Report security vulnerabilities privately through [SECURITY.md](https://github.com/mbianchidev/yt2karaoke/blob/main/SECURITY.md), not here.
+        Do not attach copyrighted recordings, browser cookies, credentials, or personal data.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps, ideally with generated audio (for example a sine tone) or original test lyrics.
+      placeholder: |
+        1. Run `yt2karaoke player --port 5000`
+        2. Choose Local file and add `tone.wav`
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      multiple: true
+      options:
+        - Browser studio
+        - Stage window
+        - CLI (`yt2karaoke convert`)
+        - Python API
+        - REST API
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Source
+      options:
+        - YouTube link
+        - Local audio or video file
+        - Local file with timed lyrics JSON
+        - Not applicable
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: yt2karaoke version or commit
+      description: Output of `yt2karaoke --version`, or the commit SHA for a source checkout.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system and architecture, Python version, ffmpeg version, browser (for studio issues), and Node.js or Deno version (for YouTube issues).
+      placeholder: |
+        macOS 26 arm64, Python 3.14.x, ffmpeg 8.x, Chrome 150, Node 26
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Terminal output or browser console errors. Redact paths, usernames, and anything private.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and the [troubleshooting guide](https://github.com/mbianchidev/yt2karaoke/blob/main/docs/troubleshooting.md).
+          required: true
+        - label: I removed credentials, cookies, personal data, and copyrighted media from this report.
+          required: true

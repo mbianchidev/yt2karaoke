@@ -1,6 +1,6 @@
 # Development
 
-The application retains its Python/Flask architecture. Templates, CSS, JavaScript, fonts and the Socket.IO client are packaged together; there is no npm build step.
+The application retains its Python/Flask architecture. Templates, CSS, JavaScript, fonts and the Socket.IO client are packaged together; there is no npm build step. Contribution workflow and policies are in [CONTRIBUTING.md](../CONTRIBUTING.md); coding agents should also read [AGENTS.md](../AGENTS.md).
 
 ## Install and run
 
@@ -31,15 +31,13 @@ pytest tests/e2e
 pytest tests/live -m live_youtube
 
 # JavaScript syntax
-node --check src/yt2karaoke/player/static/theme.js
-node --check src/yt2karaoke/player/static/studio.js
-node --check src/yt2karaoke/player/static/audio-mixer.js
-node --check src/yt2karaoke/player/static/pitch-processor.js
-node --check src/yt2karaoke/player/static/stage.js
+for script in src/yt2karaoke/player/static/*.js; do node --check "$script"; done
 
 # Wheel and source distribution using uv's isolated build backend
 uv build
 ```
+
+The **CI** workflow (`.github/workflows/ci.yml`) runs the JavaScript syntax checks, the deterministic suite (unit, media and browser tests) and `uv build` on every pull request and every push to `main`. It and the full-song workflow share the `.github/actions/setup-environment` composite action, which installs Node, Python 3.14 with uv, FFmpeg, CPU-only dependencies and Playwright Chromium. Dependabot proposes monthly grouped updates for the pinned actions.
 
 The browser tests run with both light and dark system preferences and use generated sine-wave media and original test lyrics. Download, separation and transcription services are mocked in these deterministic tests; the pipeline, video encoder, remix, HTTP server, queue, browser controls and file downloads are real. Theme checks cover keyboard selection, persistence, system changes, cross-tab synchronization, blocked storage, contrast and narrow layouts.
 
@@ -66,11 +64,13 @@ YT2KARAOKE_ARTIFACT_DIR=/absolute/path/to/reports \
   pytest tests/live -m live_youtube --junitxml=/absolute/path/to/reports/live.xml
 ```
 
-The private-repository trigger policy is deliberately strict:
+Because it depends on YouTube, real models and a job of up to 35 minutes, the full-song workflow has a narrower trigger policy than CI:
 
-- Marking a draft PR **ready for review** runs CI on that event's revision.
-- Draft creation, draft pushes, opening an already-ready PR, and later commits on a ready PR do not trigger it. After each new head, return the PR to draft and mark it ready again.
-- Pushes to `main` and manual dispatch are supported. Manual dispatch tests the selected ref and does not replace PR readiness validation; a newly added workflow may not be dispatchable until it exists on the default branch.
+- Marking a draft PR **ready for review** runs it on that event's revision.
+- Draft creation, draft pushes, opening an already-ready PR, and later commits on a ready PR do not trigger it. To rerun it for a new head, return the PR to draft and mark it ready again.
+- Pushes to `main` and manual dispatch are supported. Manual dispatch tests the selected ref and does not replace PR readiness validation.
+
+Pull requests from forks run with a read-only token and no repository secrets; the CI and full-song workflows need none.
 
 The workflow uses one CPU-only Linux job, two model/encoder threads, dependency caching and public model-weight caching. It cancels obsolete runs for the same PR/ref. Source recordings, separated song stems, full lyrics and full-song renders stay in a private temporary directory and are removed after the test. They are never cached or uploaded.
 
@@ -105,6 +105,8 @@ This is a live external-service test: network errors, unavailable media, YouTube
 ## Self-hosted assets
 
 Socket.IO client 4.8.4 is vendored from its published npm package. Outfit and Instrument Sans are from the Google Fonts repository. Their MIT and SIL OFL notices are included under `player/static/vendor/` and `player/static/fonts/` and must remain with redistributed assets.
+
+The project's own code is MIT-licensed ([LICENSE](../LICENSE)). Because the wheel bundles these fonts, `setup.py` declares the package license as the SPDX expression `MIT AND OFL-1.1` and lists all three notices in `license_files`, so they are copied into the wheel's `.dist-info/licenses/` and the source archive.
 
 The renderer uses FFmpeg directly so Pillow can receive current security updates. Do not restore MoviePy's `Pillow<12` constraint. Pillow 13+ and pytest 9.0.3+ are required.
 
